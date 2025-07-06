@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Chatbot</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        
+        #chatDisplay {
+            border: 1px solid #ddd;
+            height: 400px;
+            overflow-y: auto;
+            padding: 15px;
+            margin: 20px 0;
+            background: #fafafa;
+            border-radius: 5px;
+        }
+        
+        .controls {
+            text-align: center;
+            margin: 20px 0;
+        }
+        
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            margin: 5px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        #recordBtn {
+            background: #28a745;
+            color: white;
+        }
+        
+        #recordBtn:hover {
+            background: #218838;
+        }
+        
+        #recordBtn.recording {
+            background: #dc3545;
+        }
+        
+        #testBtn {
+            background: #007bff;
+            color: white;
+        }
+        
+        #testBtn:hover {
+            background: #0056b3;
+        }
+        
+        .message {
+            margin: 10px 0;
+            padding: 8px;
+            border-radius: 5px;
+        }
+        
+        .user-message {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+        
+        .bot-message {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+        }
+        
+        .system-message {
+            background: #fff3e0;
+            border-left: 4px solid #ff9800;
+        }
+        
+        .error-message {
+            background: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🎤 Voice Chatbot</h1>
+        
+        <div class="controls">
+            <button id="recordBtn">🎤 Start Recording</button>
+            <button id="testBtn">🔧 Test API</button>
+        </div>
+        
+        <div id="chatDisplay">
+            <div class="system-message">
+                <strong>System:</strong> Welcome! Click "Test API" to verify connection, then "Start Recording" to chat with voice.
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const recordBtn = document.getElementById('recordBtn');
+        const testBtn = document.getElementById('testBtn');
+        const chatDisplay = document.getElementById('chatDisplay');
+
+        // Test API connection
+        testBtn.addEventListener('click', async () => {
+            try {
+                const response = await fetch('/health');
+                const data = await response.json();
+                addMessage('system', `✅ API Connected: ${data.status}`);
+            } catch (error) {
+                addMessage('error', `❌ API Connection failed: ${error.message}`);
+            }
+        });
+
+        let mediaRecorder;
+        let audioChunks = [];
+
+        recordBtn.addEventListener('click', async () => {
+            if (mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+                recordBtn.textContent = '🎤 Start Recording';
+                recordBtn.classList.remove('recording');
+            } else {
+                await startRecording();
+            }
+        });
+
+        async function startRecording() {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                audioChunks = [];
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                    await sendVoiceMessage(audioBlob);
+                    stream.getTracks().forEach(track => track.stop());
+                };
+
+                mediaRecorder.start();
+                recordBtn.textContent = '⏹️ Stop Recording';
+                recordBtn.classList.add('recording');
+                addMessage('system', '🎤 Recording started... Speak now!');
+            } catch (error) {
+                console.error('Error starting recording:', error);
+                addMessage('error', `❌ Recording error: ${error.message}`);
+            }
+        }
+
+        async function sendVoiceMessage(audioBlob) {
+            const formData = new FormData();
+            formData.append('audio', audioBlob, 'voice-message.wav');
+
+            try {
+                addMessage('system', '🎤 Processing your voice...');
+                
+                const response = await fetch('/api/chat/voice', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    addMessage('user', result.userMessage);
+                    addMessage('bot', result.botResponse);
+                } else {
+                    addMessage('error', `❌ Error: ${result.error}`);
+                }
+            } catch (error) {
+                console.error('Error sending voice message:', error);
+                addMessage('error', `❌ Error processing voice: ${error.message}`);
+            }
+        }
+
+        function addMessage(type, message) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${type}-message`;
+            
+            const label = type === 'user' ? 'You' : 
+                         type === 'bot' ? 'Bot' : 
+                         type === 'system' ? 'System' : 'Error';
+            
+            messageDiv.innerHTML = `<strong>${label}:</strong> ${message}`;
+            chatDisplay.appendChild(messageDiv);
+            chatDisplay.scrollTop = chatDisplay.scrollHeight;
+        }
+    </script>
+</body>
+</html>
