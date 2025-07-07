@@ -1,7 +1,4 @@
-// lib/api.ts
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000';
-
-export interface ChatResponse {
+interface ChatResponse {
   response: string;
   conversationId: string;
   travelDetails?: any;
@@ -13,116 +10,89 @@ export interface ChatResponse {
   enrichedWithRealData?: boolean;
 }
 
-export interface SendMessageRequest {
-  message: string;
-  conversationId?: string;
-}
-
-export interface ConversationResponse {
+interface ConversationResponse {
+  conversation: Array<{
+    role: 'user' | 'assistant';
+    content: string;
+  }>;
   conversationId: string;
 }
 
-export interface ConversationHistoryResponse {
-  conversation: Array<{
-    role: string;
-    content: string;
-  }>;
+interface NewConversationResponse {
+  conversationId: string;
 }
 
-class ChatAPI {
-  private async makeRequest<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-    const url = `${API_BASE_URL}${endpoint}`;
-    
-    const defaultOptions: RequestInit = {
+export const chatAPI = {
+  async sendMessage({ message, conversationId }: { message: string; conversationId: string }): Promise<ChatResponse> {
+    const response = await fetch('/api/chat', {
+      method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        ...options.headers,
       },
-      ...options,
-    };
+      body: JSON.stringify({ message, conversationId }),
+    });
 
-    try {
-      const response = await fetch(url, defaultOptions);
-      
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new APIError(
-          errorData.error || `HTTP ${response.status}: ${response.statusText}`,
-          response.status,
-          errorData
-        );
-      }
-
-      return await response.json();
-    } catch (error) {
-      if (error instanceof APIError) {
-        throw error;
-      }
-      
-      // Network or other errors
-      throw new APIError(
-        'Unable to connect to TripTailor. Please check your internet connection.',
-        0,
-        { originalError: error }
-      );
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
     }
-  }
 
-  async sendMessage(request: SendMessageRequest): Promise<ChatResponse> {
-    return this.makeRequest<ChatResponse>('/api/chat', {
+    return response.json();
+  },
+
+  async createConversation(): Promise<NewConversationResponse> {
+    const response = await fetch('/api/new-conversation', {
       method: 'POST',
-      body: JSON.stringify(request),
+      headers: {
+        'Content-Type': 'application/json',
+      },
     });
-  }
 
-  async createConversation(): Promise<ConversationResponse> {
-    return this.makeRequest<ConversationResponse>('/api/new-conversation', {
-      method: 'POST',
-    });
-  }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
 
-  async getConversation(conversationId: string): Promise<ConversationHistoryResponse> {
-    return this.makeRequest<ConversationHistoryResponse>(`/api/conversation/${conversationId}`);
-  }
+    return response.json();
+  },
 
-  async healthCheck(): Promise<any> {
-    return this.makeRequest<any>('/health');
-  }
-}
+  async getConversation(conversationId: string): Promise<ConversationResponse> {
+    const response = await fetch(`/api/conversation/${conversationId}`);
 
-export class APIError extends Error {
-  constructor(
-    message: string,
-    public status: number,
-    public data?: any
-  ) {
-    super(message);
-    this.name = 'APIError';
-  }
-}
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
 
-export const chatAPI = new ChatAPI();
+    return response.json();
+  },
+
+  async getAgentState(conversationId: string) {
+    const response = await fetch(`/api/agent-state/${conversationId}`);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  },
+
+  async getHealth() {
+    const response = await fetch('/api/health');
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${response.status}: ${response.statusText}`);
+    }
+
+    return response.json();
+  }
+};
 
 export function handleAPIError(error: unknown): string {
-  if (error instanceof APIError) {
-    // Handle specific API errors
-    switch (error.status) {
-      case 0:
-        return 'Unable to connect to TripTailor. Please check your internet connection.';
-      case 400:
-        return 'Invalid request. Please check your input and try again.';
-      case 429:
-        return 'Too many requests. Please wait a moment and try again.';
-      case 500:
-        return 'TripTailor is experiencing issues. Please try again in a moment.';
-      default:
-        return error.message || 'Something went wrong. Please try again.';
-    }
-  }
-  
   if (error instanceof Error) {
     return error.message;
   }
-  
   return 'An unexpected error occurred. Please try again.';
 }
