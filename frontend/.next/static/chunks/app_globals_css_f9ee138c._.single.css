@@ -351,10 +351,6 @@
     bottom: calc(var(--spacing) * 4);
   }
 
-  .bottom-full {
-    bottom: 100%;
-  }
-
   .left-0 {
     left: calc(var(--spacing) * 0);
   }
@@ -1247,7 +1243,7 @@ body {
 }
 
 .mesh-background {
-  background-image: url("../media/mesh.48f3be7d.svg");
+  background-image: url("../media/mesh.10a5e866.svg");
   background-size: cover;
 }
 

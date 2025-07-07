@@ -2,11 +2,10 @@
 
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClientComponentClient } from '@supabase/auth-helpers-nextjs'
+import supabase from '@/lib/supabaseClient'
 
 export default function AuthCallback() {
   const router = useRouter()
-  const supabase = createClientComponentClient()
 
   useEffect(() => {
     const handleAuthCallback = async () => {
