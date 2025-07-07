@@ -1,9 +1,10 @@
 "use client";
 import React, { useState, useRef, useEffect, use } from 'react';
-import { Menu, Plus, MessageSquare, X, Loader2 } from 'lucide-react';
+import { Menu, Plus, MessageSquare, X, Loader2, LogOut, User } from 'lucide-react';
 import Link from 'next/link';
 import { chatAPI, handleAPIError } from '@/lib/api';
-import Markdown from 'react-markdown';
+import Markdown from 'react-markdown'
+import supabase from '@/lib/supabaseClient';
 
 interface Message {
   id: string;
@@ -36,8 +37,13 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [currentChatId, setCurrentChatId] = useState<string | null>(id);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
+  const [userEmail, setUserEmail] = useState<string>(''); // You'll need to get this from your auth context
+  const [showLogout, setShowLogout] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [user, setUser] = useState<any>(null); // Replace 'any' with your user type
+  const [loading, setLoading] = useState(true);
+
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,6 +60,57 @@ export default function ChatPage({ params }: ChatPageProps) {
   useEffect(() => {
     loadChatHistory();
   }, []);
+
+  useEffect(() => {
+        const getSession = async () => {
+            try {
+                const { data: { session }, error } = await supabase.auth.getSession()
+                
+                if (error) {
+                    console.error('Session error:', error)
+                    return
+                }
+                console.log('Session:', session)
+                setUser(session?.user || null)
+            } catch (error) {
+                console.error('Error getting session:', error)
+            } finally {
+                setLoading(false)
+            }
+        }
+
+        getSession()
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            (event, session) => {
+                console.log('Auth state changed:', event, session)
+                
+                if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+                    setUser(session?.user || null)
+                } else if (event === 'SIGNED_IN') {
+                    setUser(session?.user || null)
+                } else if (event === 'USER_UPDATED') {
+                    setUser(session?.user || null)
+                }
+                
+                setLoading(false)
+            }
+        )
+
+        let sessionCheckInterval;
+        if (user) {
+            sessionCheckInterval = setInterval(() => {
+                validateSession();
+            }, 5 * 60 * 1000); // 5 minutes
+        }
+
+        return () => {
+            subscription?.unsubscribe()
+            if (sessionCheckInterval) {
+                clearInterval(sessionCheckInterval)
+            }
+        }
+    }, [user]) 
 
   const initializeConversation = async () => {
     setInitializing(true);
@@ -273,6 +330,12 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
   };
 
+  const handleLogout = () => {
+    // Add your logout logic here
+    console.log('Logging out...');
+    // Example: signOut() or redirect to login
+  };
+
   const formatDate = (date: Date) => {
     const today = new Date();
     const yesterday = new Date(today);
@@ -352,6 +415,39 @@ export default function ChatPage({ params }: ChatPageProps) {
                 </button>
               ))
             )}
+          </div>
+
+          {/* Profile Section */}
+          <div className="border-t border-gray-200 p-4">
+            <div 
+              className="relative group"
+              onMouseEnter={() => setShowLogout(true)}
+              onMouseLeave={() => setShowLogout(false)}
+            >
+              <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
+                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                  <User size={16} className="text-white" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-medium text-gray-900 truncate">
+                    {user ? (user.email) : (<Link href='/log-in'>Log in</Link>)}
+                  </div>
+                </div>
+              </div>
+              
+              {/* Logout Button - appears on hover */}
+        {
+                showLogout && userEmail && (
+                  <button
+                    onClick={handleLogout}
+                    className="absolute right-0 top-full mt-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  >
+                    <LogOut size={16} className="inline mr-2" />
+                    Logout
+                  </button>
+                )
+        }
+            </div>
           </div>
         </div>
       </div>
