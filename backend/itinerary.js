@@ -557,6 +557,7 @@ CORE CAPABILITIES:
 - Create detailed day-by-day itineraries
 - Provide verified recommendations with booking information
 - Suggest alternatives based on weather, budget, and preferences
+- Use memory passed to the prompt
 
 INTELLIGENCE FEATURES:
 - Automatically detect FROM and TO locations from user messages
@@ -588,6 +589,7 @@ IMPORTANT NOTES:
 - Focus on practical, actionable advice
 - Provide backup plans and alternatives
 - Format responses in clear, easy-to-follow markdown
+- You will also be inputted memory from the frontend, which will be passed to the prompt
 
 TOOL USAGE STRATEGY:
 1. First, analyze the user's message to extract travel details

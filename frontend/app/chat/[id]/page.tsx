@@ -300,6 +300,22 @@ export default function ChatPage({ params }: ChatPageProps) {
     setImagePreviews(prev => prev.filter((_, i) => i !== index));
   };
 
+  const formatChatHistoryForMemory = (history: ChatHistory[]): string => {
+  if (!history || history.length === 0) {
+    return "No previous conversations.";
+  }
+  
+  // Get the last 3 conversations to avoid token limit issues
+  const recentChats = history.slice(0, 3);
+  
+  return recentChats.map(chat => {
+    const firstUserMessage = chat.messages.find(msg => msg.isUser)?.content || "No user message";
+    const firstAiResponse = chat.messages.find(msg => !msg.isUser)?.content || "No AI response";
+    
+    return `Previous conversation (${formatDate(chat.lastMessage)}):\nUser: ${firstUserMessage.substring(0, 100)}${firstUserMessage.length > 100 ? '...' : ''}\nAI: ${firstAiResponse.substring(0, 100)}${firstAiResponse.length > 100 ? '...' : ''}`;
+  }).join('\n\n');
+};
+
   // Click image upload button
   const handleImageUpload = () => {
     fileInputRef.current?.click();
@@ -386,130 +402,137 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
   };
 
-  const sendInitialMessage = async (message: string, convId: string, imageUrls: string[] = []) => {
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: message,
-      isUser: true,
-      timestamp: new Date().toISOString(),
-      images: imageUrls
+const sendInitialMessage = async (message: string, convId: string, imageUrls: string[] = []) => {
+  const userMessage: Message = {
+    id: Date.now().toString(),
+    content: message,
+    isUser: true,
+    timestamp: new Date().toISOString(),
+    images: imageUrls
+  };
+
+  setMessages([userMessage]);
+  setIsLoading(true);
+
+  try {
+    // First, save the conversation with initial user message to Supabase
+    if (user?.id) {
+      console.log('Attempting to insert new conversation:', {
+        id: convId,
+        user: user.id,
+        messagesCount: 1
+      });
+
+      const { error: insertError } = await supabase
+        .from('conversation')
+        .insert({
+          id: convId,
+          user: user.id,
+          messages: [userMessage],
+          created_at: new Date().toISOString()
+        });
+
+      if (insertError) {
+        console.error('Error inserting conversation - Full error:', JSON.stringify(insertError, null, 2));
+        console.error('Insert error code:', insertError.code);
+        console.error('Insert error message:', insertError.message);
+      } else {
+        console.log('Initial conversation inserted successfully');
+      }
+    }
+
+    // Process image descriptions for all uploaded images
+    let enhancedMessage = message;
+    
+    // Add chat history context (fixed)
+    const memoryContext = formatChatHistoryForMemory(chatHistory);
+    enhancedMessage += `\n\nPrevious conversation context: ${memoryContext}`;
+    
+    console.log('Enhanced message with memory:', enhancedMessage);
+    
+    if (imageUrls.length > 0) {
+      const imageDescriptions: string[] = [];
+      
+      for (const imageUrl of imageUrls) {
+        try {
+          console.log('Describing image:', imageUrl);
+          const description = await describeImage(imageUrl);
+          console.log('Image description:', description);
+          imageDescriptions.push(description);
+        } catch (error) {
+          console.error('Error describing image:', error);
+          imageDescriptions.push('Unable to describe image.');
+        }
+      }
+      
+      if (imageDescriptions.length > 0) {
+        enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
+      }
+    }
+
+    const data = await chatAPI.sendMessage({
+      message: enhancedMessage,
+      conversationId: convId,
+      ...(imageUrls.length > 0 && { images: imageUrls })
+    });
+    
+    const aiMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      content: data.response,
+      isUser: false,
+      timestamp: new Date().toISOString()
     };
 
-    setMessages([userMessage]);
-    setIsLoading(true);
+    const updatedMessages = [userMessage, aiMessage];
+    setMessages(updatedMessages);
 
-    try {
-      // First, save the conversation with initial user message to Supabase
-      if (user?.id) {
-        console.log('Attempting to insert new conversation:', {
-          id: convId,
-          user: user.id,
-          messagesCount: 1
-        });
-
-        const { error: insertError } = await supabase
-          .from('conversation')
-          .insert({
-            id: convId, // Now works with text column
-            user: user.id,
-            messages: [userMessage],
-            created_at: new Date().toISOString()
-          });
-
-        if (insertError) {
-          console.error('Error inserting conversation - Full error:', JSON.stringify(insertError, null, 2));
-          console.error('Insert error code:', insertError.code);
-          console.error('Insert error message:', insertError.message);
-        } else {
-          console.log('Initial conversation inserted successfully');
-        }
-      }
-
-      // Process image descriptions for all uploaded images
-      let enhancedMessage = message;
-      if (imageUrls.length > 0) {
-        const imageDescriptions: string[] = [];
-        
-        for (const imageUrl of imageUrls) {
-          try {
-            console.log('Describing image:', imageUrl);
-            const description = await describeImage(imageUrl);
-            console.log('Image description:', description);
-            imageDescriptions.push(description);
-          } catch (error) {
-            console.error('Error describing image:', error);
-            imageDescriptions.push('Unable to describe image.');
-          }
-        }
-        
-        if (imageDescriptions.length > 0) {
-          enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
-        }
-      }
-
-      const data = await chatAPI.sendMessage({
-        message: enhancedMessage,
-        conversationId: convId,
-        ...(imageUrls.length > 0 && { images: imageUrls })
+    // Update conversation in Supabase with both messages
+    if (user?.id) {
+      console.log('Attempting to update conversation with AI response:', {
+        id: convId,
+        user: user.id,
+        messagesCount: updatedMessages.length
       });
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: data.response,
-        isUser: false,
-        timestamp: new Date().toISOString()
-      };
 
-      const updatedMessages = [userMessage, aiMessage];
-      setMessages(updatedMessages);
+      const { error: updateError } = await supabase
+        .from('conversation')
+        .update({
+          messages: updatedMessages,
+        })
+        .eq('id', convId);
 
-      // Update conversation in Supabase with both messages
-      if (user?.id) {
-        console.log('Attempting to update conversation with AI response:', {
-          id: convId,
-          user: user.id,
-          messagesCount: updatedMessages.length
-        });
-
-        const { error: updateError } = await supabase
-          .from('conversation')
-          .update({
-            messages: updatedMessages,
-          })
-          .eq('id', convId); // Now works with text column
-
-        if (updateError) {
-          console.error('Error updating initial conversation - Full error:', JSON.stringify(updateError, null, 2));
-          console.error('Update error code:', updateError.code);
-          console.error('Update error message:', updateError.message);
-        } else {
-          console.log('Initial conversation updated successfully');
-        }
+      if (updateError) {
+        console.error('Error updating initial conversation - Full error:', JSON.stringify(updateError, null, 2));
+        console.error('Update error code:', updateError.code);
+        console.error('Update error message:', updateError.message);
+      } else {
+        console.log('Initial conversation updated successfully');
       }
-
-      if (data.enrichedWithRealData) {
-        console.log('✨ Response enhanced with real travel data!');
-      }
-
-      if (data.toolsUsed && data.toolsUsed.length > 0) {
-        console.log('🔧 Tools used:', data.toolsUsed);
-      }
-
-    } catch (error) {
-      console.error('Failed to send initial message:', error);
-      setConnectionError(handleAPIError(error));
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `❌ ${handleAPIError(error)}`,
-        isUser: false,
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
     }
-  };
+
+    if (data.enrichedWithRealData) {
+      console.log('✨ Response enhanced with real travel data!');
+    }
+
+    if (data.toolsUsed && data.toolsUsed.length > 0) {
+      console.log('🔧 Tools used:', data.toolsUsed);
+    }
+
+  } catch (error) {
+    console.error('Failed to send initial message:', error);
+    setConnectionError(handleAPIError(error));
+    
+    const errorMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      content: `❌ ${handleAPIError(error)}`,
+      isUser: false,
+      timestamp: new Date().toISOString()
+    };
+    setMessages(prev => [...prev, errorMessage]);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const loadConversation = async (convId: string) => {
     try {
@@ -626,146 +649,151 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
   };
 
-  const handleSendMessage = async () => {
-    if ((!inputValue.trim() && selectedImages.length === 0) || isLoading) return;
+const handleSendMessage = async () => {
+  if ((!inputValue.trim() && selectedImages.length === 0) || isLoading) return;
 
-    setIsLoading(true);
-    setConnectionError(null);
+  setIsLoading(true);
+  setConnectionError(null);
 
-    // Upload images to Supabase Storage and get URLs
-    const imageUrls: string[] = [];
-    const imageDescriptions: string[] = [];
+  // Upload images to Supabase Storage and get URLs
+  const imageUrls: string[] = [];
+  const imageDescriptions: string[] = [];
+  
+  if (selectedImages.length > 0) {
+    console.log('Uploading images to storage...');
     
-    if (selectedImages.length > 0) {
-      console.log('Uploading images to storage...');
-      
-      for (const file of selectedImages) {
-        const uploadedUrl = await uploadFileToStorage(file);
-        if (uploadedUrl) {
-          imageUrls.push(uploadedUrl);
-          
-          // Get image description for each uploaded image
-          try {
-            console.log('Describing image:', uploadedUrl);
-            const description = await describeImage(uploadedUrl);
-            console.log('Image description:', description);
-            imageDescriptions.push(description);
-          } catch (error) {
-            console.error('Error describing image:', error);
-            imageDescriptions.push('Unable to describe image.');
-          }
-        } else {
-          console.error('Failed to upload image:', file.name);
+    for (const file of selectedImages) {
+      const uploadedUrl = await uploadFileToStorage(file);
+      if (uploadedUrl) {
+        imageUrls.push(uploadedUrl);
+        
+        // Get image description for each uploaded image
+        try {
+          console.log('Describing image:', uploadedUrl);
+          const description = await describeImage(uploadedUrl);
+          console.log('Image description:', description);
+          imageDescriptions.push(description);
+        } catch (error) {
+          console.error('Error describing image:', error);
+          imageDescriptions.push('Unable to describe image.');
         }
+      } else {
+        console.error('Failed to upload image:', file.name);
       }
-      
-      console.log('Uploaded image URLs:', imageUrls);
-      console.log('Image descriptions:', imageDescriptions);
     }
+    
+    console.log('Uploaded image URLs:', imageUrls);
+    console.log('Image descriptions:', imageDescriptions);
+  }
 
-    // Enhance message with image descriptions
-    let enhancedMessage = inputValue;
-    if (imageDescriptions.length > 0) {
-      enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
-    }
+  // Enhance message with memory context and image descriptions
+  let enhancedMessage = inputValue;
+  
+  // Add chat history context for regular messages too
+  const memoryContext = formatChatHistoryForMemory(chatHistory);
+  enhancedMessage += `\n\nPrevious conversation context: ${memoryContext}`;
+  
+  if (imageDescriptions.length > 0) {
+    enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
+  }
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      content: inputValue, // Store original message without descriptions
-      isUser: true,
-      timestamp: new Date().toISOString(),
-      images: imageUrls // Use URLs instead of base64
+  const userMessage: Message = {
+    id: Date.now().toString(),
+    content: inputValue, // Store original message without descriptions
+    isUser: true,
+    timestamp: new Date().toISOString(),
+    images: imageUrls // Use URLs instead of base64
+  };
+
+  const currentInput = inputValue;
+  setInputValue('');
+  setSelectedImages([]);
+  setImagePreviews([]);
+
+  // Update messages state with user message
+  const updatedMessagesWithUser = [...messages, userMessage];
+  setMessages(updatedMessagesWithUser);
+
+  try {
+    // Send enhanced message to API with image URLs
+    const data = await chatAPI.sendMessage({
+      message: enhancedMessage, // Send enhanced message with descriptions and memory
+      conversationId: conversationId || id,
+      ...(imageUrls.length > 0 && { images: imageUrls })
+    } as any);
+    
+    const aiMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      content: data.response,
+      isUser: false,
+      timestamp: new Date().toISOString()
     };
 
-    const currentInput = inputValue;
-    setInputValue('');
-    setSelectedImages([]);
-    setImagePreviews([]);
+    // Update messages state with AI response
+    const finalMessages = [...updatedMessagesWithUser, aiMessage];
+    setMessages(finalMessages);
 
-    // Update messages state with user message
-    const updatedMessagesWithUser = [...messages, userMessage];
-    setMessages(updatedMessagesWithUser);
+    // Update conversation ID if it was created
+    if (data.conversationId && !conversationId) {
+      setConversationId(data.conversationId);
+    }
 
-    try {
-      // Send enhanced message to API with image URLs
-      const data = await chatAPI.sendMessage({
-        message: enhancedMessage, // Send enhanced message with descriptions
-        conversationId: conversationId || id,
-        ...(imageUrls.length > 0 && { images: imageUrls }) // Send URLs instead of base64
-      } as any);
-      
-      const aiMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: data.response,
-        isUser: false,
-        timestamp: new Date().toISOString()
-      };
+    // Update the conversation in Supabase
+    if (user?.id) {
+      const conversationIdToUse = conversationId || id;
+      console.log('Attempting to save conversation:', {
+        id: conversationIdToUse,
+        user: user.id,
+        messagesCount: finalMessages.length
+      });
 
-      // Update messages state with AI response
-      const finalMessages = [...updatedMessagesWithUser, aiMessage];
-      setMessages(finalMessages);
-
-      // Update conversation ID if it was created
-      if (data.conversationId && !conversationId) {
-        setConversationId(data.conversationId);
-      }
-
-      // Update the conversation in Supabase
-      if (user?.id) {
-        const conversationIdToUse = conversationId || id;
-        console.log('Attempting to save conversation:', {
+      const { error } = await supabase
+        .from('conversation')
+        .upsert({
           id: conversationIdToUse,
           user: user.id,
-          messagesCount: finalMessages.length
+          messages: finalMessages,
+          created_at: new Date().toISOString()
         });
 
-        const { error } = await supabase
-          .from('conversation')
-          .upsert({
-            id: conversationIdToUse,
-            user: user.id,
-            messages: finalMessages,
-            created_at: new Date().toISOString()
-          });
-
-        if (error) {
-          console.error('Error updating conversation - Full error:', JSON.stringify(error, null, 2));
-          console.error('Error code:', error.code);
-          console.error('Error message:', error.message);
-          console.error('Error details:', error.details);
-          console.error('Error hint:', error.hint);
-        } else {
-          console.log('Conversation saved successfully');
-        }
+      if (error) {
+        console.error('Error updating conversation - Full error:', JSON.stringify(error, null, 2));
+        console.error('Error code:', error.code);
+        console.error('Error message:', error.message);
+        console.error('Error details:', error.details);
+        console.error('Error hint:', error.hint);
+      } else {
+        console.log('Conversation saved successfully');
       }
-
-      if (data.enrichedWithRealData) {
-        console.log('✨ Response enhanced with real travel data!');
-      }
-
-      if (data.toolsUsed && data.toolsUsed.length > 0) {
-        console.log('🔧 Tools used:', data.toolsUsed);
-      }
-
-      if (data.agentWorkflow) {
-        console.log('🤖 Agent workflow completed:', data.agentWorkflow.stepsCompleted);
-      }
-
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      setConnectionError(handleAPIError(error));
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        content: `❌ ${handleAPIError(error)}`,
-        isUser: false,
-        timestamp: new Date().toISOString()
-      };
-      setMessages(prev => [...prev, errorMessage]);
-    } finally {
-      setIsLoading(false);
     }
-  };
+
+    if (data.enrichedWithRealData) {
+      console.log('✨ Response enhanced with real travel data!');
+    }
+
+    if (data.toolsUsed && data.toolsUsed.length > 0) {
+      console.log('🔧 Tools used:', data.toolsUsed);
+    }
+
+    if (data.agentWorkflow) {
+      console.log('🤖 Agent workflow completed:', data.agentWorkflow.stepsCompleted);
+    }
+
+  } catch (error) {
+    console.error('Failed to send message:', error);
+    setConnectionError(handleAPIError(error));
+    
+    const errorMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      content: `❌ ${handleAPIError(error)}`,
+      isUser: false,
+      timestamp: new Date().toISOString()
+    };
+    setMessages(prev => [...prev, errorMessage]);
+  } finally {
+    setIsLoading(false);
+  }
+};
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {

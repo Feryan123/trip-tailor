@@ -403,10 +403,6 @@
 @layer components;
 
 @layer utilities {
-  .visible {
-    visibility: visible;
-  }
-
   .absolute {
     position: absolute;
   }
@@ -437,10 +433,6 @@
 
   .top-6 {
     top: calc(var(--spacing) * 6);
-  }
-
-  .top-full {
-    top: 100%;
   }
 
   .-right-2 {
@@ -503,20 +495,12 @@
     margin-top: calc(var(--spacing) * 1);
   }
 
-  .mt-2 {
-    margin-top: calc(var(--spacing) * 2);
-  }
-
   .mt-4 {
     margin-top: calc(var(--spacing) * 4);
   }
 
   .mt-15 {
     margin-top: calc(var(--spacing) * 15);
-  }
-
-  .mr-2 {
-    margin-right: calc(var(--spacing) * 2);
   }
 
   .mb-1 {
@@ -560,10 +544,6 @@
 
   .hidden {
     display: none;
-  }
-
-  .inline {
-    display: inline;
   }
 
   .table {
@@ -722,10 +702,6 @@
 
   .animate-spin {
     animation: var(--animate-spin);
-  }
-
-  .cursor-pointer {
-    cursor: pointer;
   }
 
   .resize-none {
@@ -1307,12 +1283,6 @@
   }
 
   @media (hover: hover) {
-    .hover\:bg-red-50:hover {
-      background-color: var(--color-red-50);
-    }
-  }
-
-  @media (hover: hover) {
     .hover\:bg-red-600:hover {
       background-color: var(--color-red-600);
     }
@@ -1413,7 +1383,7 @@ body {
 }
 
 .mesh-background {
-  background-image: url("../media/mesh.10a5e866.svg");
+  background-image: url("../media/mesh.48f3be7d.svg");
   background-size: cover;
 }
 
