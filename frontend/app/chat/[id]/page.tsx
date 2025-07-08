@@ -58,10 +58,13 @@ export default function ChatPage({ params }: ChatPageProps) {
   }, [id]);
 
   useEffect(() => {
-    if (user?.id) {
+    // Only load chat history if user is authenticated and not loading
+    if (user?.id && !loading) {
       loadChatHistory();
+    } else {
+      setChatHistory([]);
     }
-  }, [user]);
+  }, [user?.id, loading]); // Only depend on user.id, not the entire user object
 
   useEffect(() => {
     const getSession = async () => {
@@ -100,38 +103,44 @@ export default function ChatPage({ params }: ChatPageProps) {
         
         if (session?.user?.email) {
           setUserEmail(session.user.email)
+        } else {
+          setUserEmail('')
         }
         
         setLoading(false)
       }
     )
 
-    let sessionCheckInterval: NodeJS.Timeout;
-    if (user) {
-      sessionCheckInterval = setInterval(() => {
-        validateSession();
+    return () => {
+      subscription?.unsubscribe()
+    }
+  }, []) // Empty dependency array - only runs once on mount
+
+  // Session validation interval - separate useEffect to avoid recreating interval
+  useEffect(() => {
+    let sessionCheckInterval: NodeJS.Timeout | null = null;
+    
+    if (user?.id) {
+      // Set up interval to check session every 5 minutes
+      sessionCheckInterval = setInterval(async () => {
+        try {
+          const { data: { session }, error } = await supabase.auth.getSession()
+          if (error || !session) {
+            setUser(null)
+            setUserEmail('')
+          }
+        } catch (error) {
+          console.error('Session validation error:', error)
+        }
       }, 5 * 60 * 1000); // 5 minutes
     }
 
     return () => {
-      subscription?.unsubscribe()
       if (sessionCheckInterval) {
         clearInterval(sessionCheckInterval)
       }
     }
-  }, [user])
-
-  const validateSession = async () => {
-    try {
-      const { data: { session }, error } = await supabase.auth.getSession()
-      if (error || !session) {
-        setUser(null)
-        setUserEmail('')
-      }
-    } catch (error) {
-      console.error('Session validation error:', error)
-    }
-  }
+  }, [user?.id]) // Only recreate interval when user.id changes
 
   const initializeConversation = async () => {
     setInitializing(true);
@@ -184,17 +193,27 @@ export default function ChatPage({ params }: ChatPageProps) {
     try {
       // First, save the conversation with initial user message to Supabase
       if (user?.id) {
+        console.log('Attempting to insert new conversation:', {
+          id: convId,
+          user: user.id,
+          messagesCount: 1
+        });
+
         const { error: insertError } = await supabase
-          .from('Conversation')
+          .from('conversation')
           .insert({
-            id: convId,
+            id: convId, // Don't convert to string since DB expects int8
             user: user.id,
             messages: [userMessage],
             created_at: new Date().toISOString()
           });
 
         if (insertError) {
-          console.error('Error inserting conversation:', insertError);
+          console.error('Error inserting conversation - Full error:', JSON.stringify(insertError, null, 2));
+          console.error('Insert error code:', insertError.code);
+          console.error('Insert error message:', insertError.message);
+        } else {
+          console.log('Initial conversation inserted successfully');
         }
       }
 
@@ -216,15 +235,25 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       // Update conversation in Supabase with both messages
       if (user?.id) {
+        console.log('Attempting to update conversation with AI response:', {
+          id: convId,
+          user: user.id,
+          messagesCount: updatedMessages.length
+        });
+
         const { error: updateError } = await supabase
-          .from('Conversation')
+          .from('conversation')
           .update({
             messages: updatedMessages,
           })
-          .eq('id', convId);
+          .eq('id', convId); // Don't convert to string
 
         if (updateError) {
-          console.error('Error updating conversation:', updateError);
+          console.error('Error updating initial conversation - Full error:', JSON.stringify(updateError, null, 2));
+          console.error('Update error code:', updateError.code);
+          console.error('Update error message:', updateError.message);
+        } else {
+          console.log('Initial conversation updated successfully');
         }
       }
 
@@ -257,9 +286,9 @@ export default function ChatPage({ params }: ChatPageProps) {
       // First try to load from Supabase
       if (user?.id) {
         const { data: supabaseData, error } = await supabase
-          .from('Conversation')
+          .from('conversation')
           .select('messages')
-          .eq('id', convId)
+          .eq('id', convId) // Don't convert to string
           .eq('user', user.id)
           .single();
 
@@ -282,9 +311,9 @@ export default function ChatPage({ params }: ChatPageProps) {
       // Save to Supabase for future use
       if (user?.id) {
         const { error } = await supabase
-          .from('Conversation')
+          .from('conversation')
           .upsert({
-            id: convId,
+            id: convId, // Don't convert to string
             user: user.id,
             messages: formattedMessages,
             created_at: new Date().toISOString()
@@ -316,19 +345,34 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
 
     try {
+      console.log('Loading chat history for user:', user.id);
+      
       const { data, error } = await supabase
-        .from('Conversation')
+        .from('conversation')
         .select('id, messages, created_at')
         .eq('user', user.id)
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Error loading chat history:', error);
+        console.error('Supabase error details:', error);
+        // Don't retry on table not found errors
+        if (error.code === '42P01' || error.message?.includes('does not exist')) {
+          console.log('Conversation table does not exist yet - this is normal for new installations');
+          setChatHistory([]);
+          return;
+        }
+        throw error;
+      }
+
+      console.log('Chat history data:', data);
+
+      if (!data || data.length === 0) {
+        console.log('No chat history found');
         setChatHistory([]);
         return;
       }
 
-      const formattedHistory: ChatHistory[] = data?.map(conversation => {
+      const formattedHistory: ChatHistory[] = data.map(conversation => {
         const messages = conversation.messages || [];
         const firstUserMessage = messages.find((msg: Message) => msg.isUser);
         
@@ -341,8 +385,9 @@ export default function ChatPage({ params }: ChatPageProps) {
           })),
           lastMessage: new Date(conversation.created_at)
         };
-      }) || [];
+      });
 
+      console.log('Formatted history:', formattedHistory);
       setChatHistory(formattedHistory);
     } catch (error) {
       console.error('Failed to load chat history:', error);
@@ -393,17 +438,30 @@ export default function ChatPage({ params }: ChatPageProps) {
 
       // Update the conversation in Supabase
       if (user?.id) {
+        const conversationIdToUse = conversationId || id;
+        console.log('Attempting to save conversation:', {
+          id: conversationIdToUse,
+          user: user.id,
+          messagesCount: finalMessages.length
+        });
+
         const { error } = await supabase
-          .from('Conversation')
+          .from('conversation')
           .upsert({
-            id: conversationId || id,
+            id: conversationIdToUse, // Don't convert to string since DB expects int8
             user: user.id,
             messages: finalMessages,
             created_at: new Date().toISOString()
           });
 
         if (error) {
-          console.error('Error updating conversation:', error);
+          console.error('Error updating conversation - Full error:', JSON.stringify(error, null, 2));
+          console.error('Error code:', error.code);
+          console.error('Error message:', error.message);
+          console.error('Error details:', error.details);
+          console.error('Error hint:', error.hint);
+        } else {
+          console.log('Conversation saved successfully');
         }
       }
 

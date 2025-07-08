@@ -454,6 +454,10 @@
     display: inline;
   }
 
+  .table {
+    display: table;
+  }
+
   .h-2 {
     height: calc(var(--spacing) * 2);
   }
@@ -1028,6 +1032,10 @@
 
   .text-white {
     color: var(--color-white);
+  }
+
+  .lowercase {
+    text-transform: lowercase;
   }
 
   .uppercase {
