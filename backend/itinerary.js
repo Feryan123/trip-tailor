@@ -33,9 +33,9 @@ const SERPAPI_URL = 'https://serpapi.com/search';
 
 const llm = new ChatGroq({
   apiKey: GROQ_API_KEY,
-  model: 'llama-3.1-8b-instant',
-  temperature: 0.7,
-  maxTokens: 2000,
+  model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+  temperature: 1,
+  maxTokens: 4096,
 });
 
 // Enhanced error logging function
