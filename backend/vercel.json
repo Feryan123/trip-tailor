@@ -2,14 +2,30 @@
   "version": 2,
   "builds": [
     {
-      "src": "index.js",
+      "src": "frontend/package.json",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist"
+      }
+    },
+    {
+      "src": "backend/itinerary.js",
       "use": "@vercel/node"
     }
   ],
   "routes": [
     {
+      "src": "/api/(.*)",
+      "dest": "/backend/itinerary.js"
+    },
+    {
       "src": "/(.*)",
-      "dest": "/index.js"
+      "dest": "/frontend/$1"
     }
-  ]
+  ],
+  "functions": {
+    "backend/itinerary.js": {
+      "maxDuration": 30
+    }
+  }
 }
