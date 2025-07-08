@@ -26,24 +26,32 @@ interface ChatPageProps {
   }>;
 }
 
-// chat/.... 
-export default function ChatPage({ params }: ChatPageProps) {
-  const { id } = use(params);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [inputValue, setInputValue] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
-  const [currentChatId, setCurrentChatId] = useState<string | null>(id);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [initializing, setInitializing] = useState(true);
-  const [userEmail, setUserEmail] = useState<string>('');
-  const [showLogout, setShowLogout] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [user, setUser] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  // chat/.... 
+  export default function ChatPage({ params }: ChatPageProps) {
+    const { id } = use(params);
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [inputValue, setInputValue] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+    const [conversationId, setConversationId] = useState<string | null>(null);
+    const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+    const [currentChatId, setCurrentChatId] = useState<string | null>(id);
+    const [connectionError, setConnectionError] = useState<string | null>(null);
+    const [initializing, setInitializing] = useState(true);
+    const [userEmail, setUserEmail] = useState<string>('');
+    const [showLogout, setShowLogout] = useState(false);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const [user, setUser] = useState<any>(null);
+    const [loading, setLoading] = useState(true);
+
+    // Redirect to login if not authenticated
+    useEffect(() => {
+      // Only check after loading is done
+      if (!loading && !user) {
+        window.location.href = '/log-in';
+      }
+    }, [loading, user]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -638,12 +646,22 @@ export default function ChatPage({ params }: ChatPageProps) {
 
           {/* Profile Section */}
           <div className="border-t border-gray-200 p-4">
-            <div 
-              className="relative group"
-              onMouseEnter={() => setShowLogout(true)}
-              onMouseLeave={() => setShowLogout(false)}
-            >
-              <div className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer">
+            {/* Always visible logout button for testing */}
+            {userEmail && (
+              <button
+                onClick={handleLogout}
+                className="mb-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors z-50 border border-red-200 bg-white"
+              >
+                <LogOut size={16} className="inline mr-2" />
+                Log Out (Test Button)
+              </button>
+            )}
+            <div className="relative group">
+              <div
+                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
+                onMouseEnter={() => setShowLogout(true)}
+                onMouseLeave={() => setShowLogout(false)}
+              >
                 <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
                   <User size={16} className="text-white" />
                 </div>
@@ -653,12 +671,13 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </div>
                 </div>
               </div>
-              
               {/* Logout Button - appears on hover */}
               {showLogout && userEmail && (
                 <button
                   onClick={handleLogout}
-                  className="absolute right-0 top-full mt-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                  className="absolute right-0 top-full mt-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors z-50"
+                  onMouseEnter={() => setShowLogout(true)}
+                  onMouseLeave={() => setShowLogout(false)}
                 >
                   <LogOut size={16} className="inline mr-2" />
                   Logout

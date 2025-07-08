@@ -401,6 +401,10 @@
 @layer components;
 
 @layer utilities {
+  .visible {
+    visibility: visible;
+  }
+
   .absolute {
     position: absolute;
   }
@@ -1128,10 +1132,6 @@
     color: var(--color-white);
   }
 
-  .lowercase {
-    text-transform: lowercase;
-  }
-
   .uppercase {
     text-transform: uppercase;
   }
@@ -1345,7 +1345,7 @@ body {
 }
 
 .mesh-background {
-  background-image: url("../media/mesh.48f3be7d.svg");
+  background-image: url("../media/mesh.10a5e866.svg");
   background-size: cover;
 }
 
