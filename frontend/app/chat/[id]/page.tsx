@@ -51,7 +51,7 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
   const [userEmail, setUserEmail] = useState<string>('');
-  const [showLogout, setShowLogout] = useState(false);
+  // Remove hover-based logout logic
   const [selectedImages, setSelectedImages] = useState<File[]>([]);
   const [imagePreviews, setImagePreviews] = useState<string[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -66,6 +66,13 @@ export default function ChatPage({ params }: ChatPageProps) {
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+
+  useEffect(() => {
+      // Only check after loading is done
+      if (!loading && !user) {
+        window.location.href = '/log-in';
+      }
+  }, [loading, user]);
 
   useEffect(() => {
     scrollToBottom();
@@ -441,98 +448,91 @@ const sendInitialMessage = async (message: string, convId: string, imageUrls: st
       }
     }
 
-    // Process image descriptions for all uploaded images
-    let enhancedMessage = message;
-    
-    // Add chat history context (fixed)
-    const memoryContext = formatChatHistoryForMemory(chatHistory);
-    enhancedMessage += `\n\nPrevious conversation context: ${memoryContext}`;
-    
-    console.log('Enhanced message with memory:', enhancedMessage);
-    
-    if (imageUrls.length > 0) {
-      const imageDescriptions: string[] = [];
-      
-      for (const imageUrl of imageUrls) {
-        try {
-          console.log('Describing image:', imageUrl);
-          const description = await describeImage(imageUrl);
-          console.log('Image description:', description);
-          imageDescriptions.push(description);
-        } catch (error) {
-          console.error('Error describing image:', error);
-          imageDescriptions.push('Unable to describe image.');
+      // Process image descriptions for all uploaded images
+      let enhancedMessage = message;
+      if (imageUrls.length > 0) {
+        const imageDescriptions: string[] = [];
+        
+        for (const imageUrl of imageUrls) {
+          try {
+            console.log('Describing image:', imageUrl);
+            const description = await describeImage(imageUrl);
+            console.log('Image description:', description);
+            imageDescriptions.push(description);
+          } catch (error) {
+            console.error('Error describing image:', error);
+            imageDescriptions.push('Unable to describe image.');
+          }
+        }
+        
+        if (imageDescriptions.length > 0) {
+          enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
         }
       }
-      
-      if (imageDescriptions.length > 0) {
-        enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
-      }
-    }
 
-    const data = await chatAPI.sendMessage({
-      message: enhancedMessage,
-      conversationId: convId,
-      ...(imageUrls.length > 0 && { images: imageUrls })
-    });
-    
-    const aiMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      content: data.response,
-      isUser: false,
-      timestamp: new Date().toISOString()
-    };
-
-    const updatedMessages = [userMessage, aiMessage];
-    setMessages(updatedMessages);
-
-    // Update conversation in Supabase with both messages
-    if (user?.id) {
-      console.log('Attempting to update conversation with AI response:', {
-        id: convId,
-        user: user.id,
-        messagesCount: updatedMessages.length
+      const data = await chatAPI.sendMessage({
+        message: enhancedMessage,
+        conversationId: convId,
+        ...(imageUrls.length > 0 && { images: imageUrls })
       });
+      
+      const aiMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: data.response,
+        isUser: false,
+        timestamp: new Date().toISOString()
+      };
 
-      const { error: updateError } = await supabase
-        .from('conversation')
-        .update({
-          messages: updatedMessages,
-        })
-        .eq('id', convId);
+      const updatedMessages = [userMessage, aiMessage];
+      setMessages(updatedMessages);
 
-      if (updateError) {
-        console.error('Error updating initial conversation - Full error:', JSON.stringify(updateError, null, 2));
-        console.error('Update error code:', updateError.code);
-        console.error('Update error message:', updateError.message);
-      } else {
-        console.log('Initial conversation updated successfully');
+      // Update conversation in Supabase with both messages
+      if (user?.id) {
+        console.log('Attempting to update conversation with AI response:', {
+          id: convId,
+          user: user.id,
+          messagesCount: updatedMessages.length
+        });
+
+        const { error: updateError } = await supabase
+          .from('conversation')
+          .update({
+            messages: updatedMessages,
+          })
+          .eq('id', convId); // Now works with text column
+
+        if (updateError) {
+          console.error('Error updating initial conversation - Full error:', JSON.stringify(updateError, null, 2));
+          console.error('Update error code:', updateError.code);
+          console.error('Update error message:', updateError.message);
+        } else {
+          console.log('Initial conversation updated successfully');
+        }
       }
-    }
 
-    if (data.enrichedWithRealData) {
-      console.log('✨ Response enhanced with real travel data!');
-    }
+      if (data.enrichedWithRealData) {
+        console.log('✨ Response enhanced with real travel data!');
+      }
 
-    if (data.toolsUsed && data.toolsUsed.length > 0) {
-      console.log('🔧 Tools used:', data.toolsUsed);
-    }
+      if (data.toolsUsed && data.toolsUsed.length > 0) {
+        console.log('🔧 Tools used:', data.toolsUsed);
+      }
 
-  } catch (error) {
-    console.error('Failed to send initial message:', error);
-    setConnectionError(handleAPIError(error));
-    
-    const errorMessage: Message = {
-      id: (Date.now() + 1).toString(),
-      content: `❌ ${handleAPIError(error)}`,
-      isUser: false,
-      timestamp: new Date().toISOString()
-    };
-    setMessages(prev => [...prev, errorMessage]);
-  } finally {
-    setIsLoading(false);
-  }
-};
+    } catch (error) {
+      console.error('Failed to send initial message:', error);
+      setConnectionError(handleAPIError(error));
+      
+      const errorMessage: Message = {
+        id: (Date.now() + 1).toString(),
+        content: `❌ ${handleAPIError(error)}`,
+        isUser: false,
+        timestamp: new Date().toISOString()
+      };
+      setMessages(prev => [...prev, errorMessage]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const loadConversation = async (convId: string) => {
     try {
@@ -649,70 +649,65 @@ const sendInitialMessage = async (message: string, convId: string, imageUrls: st
     }
   };
 
-const handleSendMessage = async () => {
-  if ((!inputValue.trim() && selectedImages.length === 0) || isLoading) return;
+  const handleSendMessage = async () => {
+    if ((!inputValue.trim() && selectedImages.length === 0) || isLoading) return;
 
-  setIsLoading(true);
-  setConnectionError(null);
+    setIsLoading(true);
+    setConnectionError(null);
 
-  // Upload images to Supabase Storage and get URLs
-  const imageUrls: string[] = [];
-  const imageDescriptions: string[] = [];
-  
-  if (selectedImages.length > 0) {
-    console.log('Uploading images to storage...');
+    // Upload images to Supabase Storage and get URLs
+    const imageUrls: string[] = [];
+    const imageDescriptions: string[] = [];
     
-    for (const file of selectedImages) {
-      const uploadedUrl = await uploadFileToStorage(file);
-      if (uploadedUrl) {
-        imageUrls.push(uploadedUrl);
-        
-        // Get image description for each uploaded image
-        try {
-          console.log('Describing image:', uploadedUrl);
-          const description = await describeImage(uploadedUrl);
-          console.log('Image description:', description);
-          imageDescriptions.push(description);
-        } catch (error) {
-          console.error('Error describing image:', error);
-          imageDescriptions.push('Unable to describe image.');
+    if (selectedImages.length > 0) {
+      console.log('Uploading images to storage...');
+      
+      for (const file of selectedImages) {
+        const uploadedUrl = await uploadFileToStorage(file);
+        if (uploadedUrl) {
+          imageUrls.push(uploadedUrl);
+          
+          // Get image description for each uploaded image
+          try {
+            console.log('Describing image:', uploadedUrl);
+            const description = await describeImage(uploadedUrl);
+            console.log('Image description:', description);
+            imageDescriptions.push(description);
+          } catch (error) {
+            console.error('Error describing image:', error);
+            imageDescriptions.push('Unable to describe image.');
+          }
+        } else {
+          console.error('Failed to upload image:', file.name);
         }
-      } else {
-        console.error('Failed to upload image:', file.name);
       }
+      
+      console.log('Uploaded image URLs:', imageUrls);
+      console.log('Image descriptions:', imageDescriptions);
     }
-    
-    console.log('Uploaded image URLs:', imageUrls);
-    console.log('Image descriptions:', imageDescriptions);
-  }
 
-  // Enhance message with memory context and image descriptions
-  let enhancedMessage = inputValue;
-  
-  // Add chat history context for regular messages too
-  const memoryContext = formatChatHistoryForMemory(chatHistory);
-  enhancedMessage += `\n\nPrevious conversation context: ${memoryContext}`;
-  
-  if (imageDescriptions.length > 0) {
-    enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
-  }
+    // Enhance message with image descriptions
+    let enhancedMessage = inputValue;
+    if (imageDescriptions.length > 0) {
+      enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
+    }
 
-  const userMessage: Message = {
-    id: Date.now().toString(),
-    content: inputValue, // Store original message without descriptions
-    isUser: true,
-    timestamp: new Date().toISOString(),
-    images: imageUrls // Use URLs instead of base64
-  };
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      content: inputValue, // Store original message without descriptions
+      isUser: true,
+      timestamp: new Date().toISOString(),
+      images: imageUrls // Use URLs instead of base64
+    };
 
-  const currentInput = inputValue;
-  setInputValue('');
-  setSelectedImages([]);
-  setImagePreviews([]);
+    const currentInput = inputValue;
+    setInputValue('');
+    setSelectedImages([]);
+    setImagePreviews([]);
 
-  // Update messages state with user message
-  const updatedMessagesWithUser = [...messages, userMessage];
-  setMessages(updatedMessagesWithUser);
+    // Update messages state with user message
+    const updatedMessagesWithUser = [...messages, userMessage];
+    setMessages(updatedMessagesWithUser);
 
   try {
     // Send enhanced message to API with image URLs
@@ -828,16 +823,8 @@ const handleSendMessage = async () => {
   };
 
   const loadChat = (chatId: string) => {
-    const chat = chatHistory.find(c => c.id === chatId);
-    if (chat) {
-      setMessages(chat.messages);
-      setCurrentChatId(chatId);
-      setConversationId(chatId);
-      setSidebarOpen(false);
-      setSelectedImages([]);
-      setImagePreviews([]);
-      window.location.href = `/chat/${chatId}`;
-    }
+    // Only navigate to the chat page; let useEffect handle loading
+    window.location.href = `/chat/${chatId}`;
   };
 
   const handleLogout = async () => {
@@ -904,6 +891,28 @@ const handleSendMessage = async () => {
 
       <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} fixed inset-y-0 left-0 z-50 w-80 bg-gray-50 border-r border-gray-200 transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}>
         <div className="flex flex-col h-full">
+          {/* Profile Section - fixed bottom left corner */}
+          <div className="fixed bottom-0 left-0 w-80 z-50 bg-gray-50 border-t border-gray-200 p-4 flex flex-col gap-2">
+            {userEmail && (
+              <button
+                onClick={handleLogout}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-red-200 bg-white"
+              >
+                <LogOut size={16} className="inline mr-2" />
+                Log Out
+              </button>
+            )}
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-white">
+              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                <User size={16} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-900 truncate">
+                  {user ? (user.email) : (<Link href='/log-in'>Log in</Link>)}
+                </div>
+              </div>
+            </div>
+          </div>
           <div className="flex items-center justify-between p-4 border-b border-gray-200">
             <button
               onClick={startNewChat}
@@ -1014,6 +1023,22 @@ const handleSendMessage = async () => {
                   className={`flex gap-4 ${message.isUser ? 'justify-end' : 'justify-start'}`}
                 >
                   <div className={`max-w-2xl ${message.isUser ? 'order-1' : 'order-2'}`}>
+                    {/* Render images above the message content if present */}
+                    {message.images && message.images.length > 0 && (
+                      <div className="mb-3">
+                        <div className="flex flex-wrap gap-2">
+                          {message.images.map((imgUrl, idx) => (
+                            <img
+                              key={idx}
+                              src={imgUrl}
+                              alt={`uploaded-${idx}`}
+                              className="max-h-48 rounded-lg border"
+                              style={{ maxWidth: 200 }}
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <div
                       className={`rounded-2xl px-4 py-3 ${
                         message.isUser
@@ -1021,21 +1046,6 @@ const handleSendMessage = async () => {
                           : 'bg-gray-100 text-black'
                       }`}
                     >
-                      {/* Display images if present */}
-                      {message.images && message.images.length > 0 && (
-                        <div className="mb-3">
-                          <div className="grid grid-cols-2 gap-2">
-                            {message.images.map((image, index) => (
-                              <img
-                                key={index}
-                                src={image}
-                                alt={`Uploaded image ${index + 1}`}
-                                className="rounded-lg max-w-full h-auto max-h-48 object-cover"
-                              />
-                            ))}
-                          </div>
-                        </div>
-                      )}
                       <div className="text-sm leading-relaxed whitespace-pre-wrap">
                         {message.isUser ? (
                           message.content
@@ -1045,6 +1055,8 @@ const handleSendMessage = async () => {
                       </div>
                     </div>
                     <div className="text-xs text-gray-500 mt-1 px-2">
+                      {/* Optionally, show message time here */}
+                      {formatMessageTime(message.timestamp)}
                     </div>
                   </div>
                 </div>
