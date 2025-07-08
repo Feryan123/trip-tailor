@@ -26,32 +26,36 @@ interface ChatPageProps {
   }>;
 }
 
-  // chat/.... 
-  export default function ChatPage({ params }: ChatPageProps) {
-    const { id } = use(params);
-    const [sidebarOpen, setSidebarOpen] = useState(false);
-    const [messages, setMessages] = useState<Message[]>([]);
-    const [inputValue, setInputValue] = useState('');
-    const [isLoading, setIsLoading] = useState(false);
-    const [conversationId, setConversationId] = useState<string | null>(null);
-    const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
-    const [currentChatId, setCurrentChatId] = useState<string | null>(id);
-    const [connectionError, setConnectionError] = useState<string | null>(null);
-    const [initializing, setInitializing] = useState(true);
-    const [userEmail, setUserEmail] = useState<string>('');
-    const [showLogout, setShowLogout] = useState(false);
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-    const textareaRef = useRef<HTMLTextAreaElement>(null);
-    const [user, setUser] = useState<any>(null);
-    const [loading, setLoading] = useState(true);
+// Extended interface for sending messages with images
+interface SendMessageWithImages {
+  message: string;
+  conversationId: string | null;
+  images?: string[];
+}
 
-    // Redirect to login if not authenticated
-    useEffect(() => {
-      // Only check after loading is done
-      if (!loading && !user) {
-        window.location.href = '/log-in';
-      }
-    }, [loading, user]);
+export default function ChatPage({ params }: ChatPageProps) {
+  const { id } = use(params);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [inputValue, setInputValue] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [chatHistory, setChatHistory] = useState<ChatHistory[]>([]);
+  const [currentChatId, setCurrentChatId] = useState<string | null>(id);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [initializing, setInitializing] = useState(true);
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [showLogout, setShowLogout] = useState(false);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -150,6 +154,190 @@ interface ChatPageProps {
     }
   }, [user?.id]) // Only recreate interval when user.id changes
 
+  useEffect(() => {
+    if (audioChunks.length > 0 && !isRecording) {
+      const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+      processAudioToText(audioBlob);
+      setAudioChunks([]);
+    }
+  }, [audioChunks, isRecording]);
+
+  const processAudioToText = async (audioBlob: Blob) => {
+    // Convert audio blob to base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const base64Audio = reader.result as string;
+      // For now, just add a placeholder message
+      // You'll need to integrate with a speech-to-text service
+      setInputValue(prev => prev + "[Voice message recorded - integrate with speech-to-text service]");
+    };
+    reader.readAsDataURL(audioBlob);
+  };
+
+  // Optional: Delete image from storage (for cleanup)
+  const deleteImageFromStorage = async (imageUrl: string) => {
+    try {
+      // Extract file path from URL
+      const urlParts = imageUrl.split('/');
+      const filePath = urlParts.slice(-2).join('/'); // Gets "images/filename.ext"
+
+      const { error } = await supabase.storage
+        .from('image')
+        .remove([filePath]);
+
+      if (error) {
+        console.error('Error deleting image:', error);
+      } else {
+        console.log('Image deleted successfully');
+      }
+    } catch (error) {
+      console.error('Error in deleteImageFromStorage:', error);
+    }
+  };
+
+  // Upload file to Supabase Storage with better error handling
+  const uploadFileToStorage = async (file: File): Promise<string | null> => {
+    try {
+      // Check if user is authenticated
+      if (!user?.id) {
+        console.error('User not authenticated');
+        return null;
+      }
+
+      // Clean filename and add user ID for organization
+      const fileExt = file.name.split('.').pop();
+      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const fileName = `${user.id}/${Date.now()}-${cleanFileName}`;
+
+      console.log('Uploading file:', {
+        originalName: file.name,
+        fileName: fileName,
+        size: file.size,
+        type: file.type
+      });
+
+      const { data, error } = await supabase.storage
+        .from('image')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (error) {
+        console.error('Supabase storage error:', error);
+        console.error('Error details:', {
+          message: error.message,
+          statusCode: error.statusCode,
+          error: error.error
+        });
+        return null;
+      }
+
+      console.log('Upload successful:', data);
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('image')
+        .getPublicUrl(fileName);
+
+      console.log('Public URL generated:', publicUrl);
+      return publicUrl;
+
+    } catch (error) {
+      console.error('Error in uploadFileToStorage:', error);
+      return null;
+    }
+  };
+
+  // Convert file to base64 (keeping for backward compatibility)
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  // Handle image selection
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+
+    const newFiles = Array.from(files).slice(0, 4 - selectedImages.length); // Limit to 4 images total
+    
+    newFiles.forEach(file => {
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        alert('Image size must be less than 10MB');
+        return;
+      }
+      
+      if (!file.type.startsWith('image/')) {
+        alert('Please select only image files');
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setImagePreviews(prev => [...prev, result]);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    setSelectedImages(prev => [...prev, ...newFiles]);
+  };
+
+  // Remove selected image
+  const removeImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Click image upload button
+  const handleImageUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          setAudioChunks(prev => [...prev, event.data]);
+        }
+      };
+      
+      recorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      recorder.start();
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      alert('Could not access microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleVoiceRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
   const initializeConversation = async () => {
     setInitializing(true);
     try {
@@ -158,16 +346,21 @@ interface ChatPageProps {
       if (id === 'new') {
         const initialMessage = sessionStorage.getItem('initialMessage');
         const newConversationId = sessionStorage.getItem('newConversationId');
+        const initialImages = sessionStorage.getItem('initialImages');
         
         if (initialMessage && newConversationId) {
           setConversationId(newConversationId);
           
           sessionStorage.removeItem('initialMessage');
           sessionStorage.removeItem('newConversationId');
+          if (initialImages) {
+            sessionStorage.removeItem('initialImages');
+          }
           
           window.history.replaceState({}, '', `/chat/${newConversationId}`);
           
-          await sendInitialMessage(initialMessage, newConversationId);
+          const imageUrls = initialImages ? JSON.parse(initialImages) : [];
+          await sendInitialMessage(initialMessage, newConversationId, imageUrls);
         } else {
           const data = await chatAPI.createConversation();
           setConversationId(data.conversationId);
@@ -187,12 +380,13 @@ interface ChatPageProps {
     }
   };
 
-  const sendInitialMessage = async (message: string, convId: string) => {
+  const sendInitialMessage = async (message: string, convId: string, imageUrls: string[] = []) => {
     const userMessage: Message = {
       id: Date.now().toString(),
       content: message,
       isUser: true,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      images: imageUrls
     };
 
     setMessages([userMessage]);
@@ -210,7 +404,7 @@ interface ChatPageProps {
         const { error: insertError } = await supabase
           .from('conversation')
           .insert({
-            id: convId, // Don't convert to string since DB expects int8
+            id: convId, // Now works with text column
             user: user.id,
             messages: [userMessage],
             created_at: new Date().toISOString()
@@ -225,10 +419,32 @@ interface ChatPageProps {
         }
       }
 
-      // Send message to AI API
+      // Process image descriptions for all uploaded images
+      let enhancedMessage = message;
+      if (imageUrls.length > 0) {
+        const imageDescriptions: string[] = [];
+        
+        for (const imageUrl of imageUrls) {
+          try {
+            console.log('Describing image:', imageUrl);
+            const description = await describeImage(imageUrl);
+            console.log('Image description:', description);
+            imageDescriptions.push(description);
+          } catch (error) {
+            console.error('Error describing image:', error);
+            imageDescriptions.push('Unable to describe image.');
+          }
+        }
+        
+        if (imageDescriptions.length > 0) {
+          enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
+        }
+      }
+
       const data = await chatAPI.sendMessage({
-        message: message,
-        conversationId: convId
+        message: enhancedMessage,
+        conversationId: convId,
+        ...(imageUrls.length > 0 && { images: imageUrls })
       });
       
       const aiMessage: Message = {
@@ -254,7 +470,7 @@ interface ChatPageProps {
           .update({
             messages: updatedMessages,
           })
-          .eq('id', convId); // Don't convert to string
+          .eq('id', convId); // Now works with text column
 
         if (updateError) {
           console.error('Error updating initial conversation - Full error:', JSON.stringify(updateError, null, 2));
@@ -296,7 +512,7 @@ interface ChatPageProps {
         const { data: supabaseData, error } = await supabase
           .from('conversation')
           .select('messages')
-          .eq('id', convId) // Don't convert to string
+          .eq('id', convId) // Now works with text column
           .eq('user', user.id)
           .single();
 
@@ -313,6 +529,7 @@ interface ChatPageProps {
         content: msg.content,
         isUser: msg.role === 'user',
         timestamp: new Date().toISOString(),
+        images: msg.images || []
       }));
       setMessages(formattedMessages);
 
@@ -321,7 +538,7 @@ interface ChatPageProps {
         const { error } = await supabase
           .from('conversation')
           .upsert({
-            id: convId, // Don't convert to string
+            id: convId, // Now works with text column
             user: user.id,
             messages: formattedMessages,
             created_at: new Date().toISOString()
@@ -404,29 +621,72 @@ interface ChatPageProps {
   };
 
   const handleSendMessage = async () => {
-    if (!inputValue.trim() || isLoading) return;
+    if ((!inputValue.trim() && selectedImages.length === 0) || isLoading) return;
+
+    setIsLoading(true);
+    setConnectionError(null);
+
+    // Upload images to Supabase Storage and get URLs
+    const imageUrls: string[] = [];
+    const imageDescriptions: string[] = [];
+    
+    if (selectedImages.length > 0) {
+      console.log('Uploading images to storage...');
+      
+      for (const file of selectedImages) {
+        const uploadedUrl = await uploadFileToStorage(file);
+        if (uploadedUrl) {
+          imageUrls.push(uploadedUrl);
+          
+          // Get image description for each uploaded image
+          try {
+            console.log('Describing image:', uploadedUrl);
+            const description = await describeImage(uploadedUrl);
+            console.log('Image description:', description);
+            imageDescriptions.push(description);
+          } catch (error) {
+            console.error('Error describing image:', error);
+            imageDescriptions.push('Unable to describe image.');
+          }
+        } else {
+          console.error('Failed to upload image:', file.name);
+        }
+      }
+      
+      console.log('Uploaded image URLs:', imageUrls);
+      console.log('Image descriptions:', imageDescriptions);
+    }
+
+    // Enhance message with image descriptions
+    let enhancedMessage = inputValue;
+    if (imageDescriptions.length > 0) {
+      enhancedMessage += `\n\nImage Descriptions:\n${imageDescriptions.map((desc, index) => `Image ${index + 1}: ${desc}`).join('\n')}`;
+    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
-      content: inputValue,
+      content: inputValue, // Store original message without descriptions
       isUser: true,
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      images: imageUrls // Use URLs instead of base64
     };
 
     const currentInput = inputValue;
     setInputValue('');
-    setIsLoading(true);
-    setConnectionError(null);
+    setSelectedImages([]);
+    setImagePreviews([]);
 
     // Update messages state with user message
     const updatedMessagesWithUser = [...messages, userMessage];
     setMessages(updatedMessagesWithUser);
 
     try {
+      // Send enhanced message to API with image URLs
       const data = await chatAPI.sendMessage({
-        message: currentInput,
-        conversationId: conversationId || id
-      });
+        message: enhancedMessage, // Send enhanced message with descriptions
+        conversationId: conversationId || id,
+        ...(imageUrls.length > 0 && { images: imageUrls }) // Send URLs instead of base64
+      } as any);
       
       const aiMessage: Message = {
         id: (Date.now() + 1).toString(),
@@ -456,7 +716,7 @@ interface ChatPageProps {
         const { error } = await supabase
           .from('conversation')
           .upsert({
-            id: conversationIdToUse, // Don't convert to string since DB expects int8
+            id: conversationIdToUse,
             user: user.id,
             messages: finalMessages,
             created_at: new Date().toISOString()
@@ -516,6 +776,8 @@ interface ChatPageProps {
       setCurrentChatId(null);
       setSidebarOpen(false);
       setConnectionError(null);
+      setSelectedImages([]);
+      setImagePreviews([]);
       
       window.location.href = `/chat/${data.conversationId}`;
     } catch (error) {
@@ -525,6 +787,8 @@ interface ChatPageProps {
       setMessages([]);
       setCurrentChatId(null);
       setSidebarOpen(false);
+      setSelectedImages([]);
+      setImagePreviews([]);
       window.location.href = '/chat/new';
     }
   };
@@ -536,6 +800,8 @@ interface ChatPageProps {
       setCurrentChatId(chatId);
       setConversationId(chatId);
       setSidebarOpen(false);
+      setSelectedImages([]);
+      setImagePreviews([]);
       window.location.href = `/chat/${chatId}`;
     }
   };
