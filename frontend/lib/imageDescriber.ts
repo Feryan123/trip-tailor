@@ -2,7 +2,7 @@
 import { Groq } from 'groq-sdk';
 
 const groq = new Groq({
-  apiKey: process.env.NEXT_GROQ_API_KEY // Set to true for browser usage
+  apiKey: process.env.NEXT_PUBLIC_GROQ_API_KEY, dangerouslyAllowBrowser: true // Set to true for browser usage
 });
 
 export async function describeImage(imageUrl: string): Promise<string> {
