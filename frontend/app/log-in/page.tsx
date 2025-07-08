@@ -109,7 +109,6 @@ const LogIn = () => {
             )}
                 </Link>
        
-        <p className='text-sm font-inter'>Don't have an account? <Link href='/sign-up' className='text-themeblue font-semibold'>Sign up</Link></p>
         </div>
     </div>
   )

@@ -1,9 +1,11 @@
 "use client";
 import Image from "next/image";
 import Link from "next/link";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { chatAPI, handleAPIError } from "@/lib/api";
+import { Trash2 } from "lucide-react";
+import supabase from "@/lib/supabaseClient";
 
 export default function Home() {
   const router = useRouter();
@@ -13,12 +15,72 @@ export default function Home() {
   const [inputValue, setInputValue] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedImages, setSelectedImages] = useState<File[]>([]);
+  const [imagePreviews, setImagePreviews] = useState<string[]>([]);
+  const [user, setUser] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [isRecording, setIsRecording] = useState(false);
+  const [mediaRecorder, setMediaRecorder] = useState<MediaRecorder | null>(null);
+  const [audioChunks, setAudioChunks] = useState<Blob[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [userEmail, setUserEmail] = useState<string>('');
+
 
   const texts = [
     "Plan a trip for me and my partner for 5 days. We are going to Japan from NYC on the 27th with a budget of $2200. Refer to these images for our dream trip.",
     "Me and my two friends are going to Los Angeles and San Diego for 6 days from Chicago. Each of us has a budget of $1500. Give fun recommendations and include Disneyland!",
     "I'm solo travelling for a week in Bali starting from Sydney next week. I have $2000 to spend. I want to visit beaches, see the culture, and meet people."
   ];
+
+    useEffect(() => {
+      const getSession = async () => {
+        try {
+          const { data: { session }, error } = await supabase.auth.getSession()
+          
+          if (error) {
+            console.error('Session error:', error)
+            return
+          }
+          console.log('Session:', session)
+          setUser(session?.user || null)
+          if (session?.user?.email) {
+            setUserEmail(session.user.email)
+          }
+        } catch (error) {
+          console.error('Error getting session:', error)
+        } finally {
+          setLoading(false)
+        }
+      }
+  
+      getSession()
+  
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(
+        (event, session) => {
+          console.log('Auth state changed:', event, session)
+          
+          if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+            setUser(session?.user || null)
+          } else if (event === 'SIGNED_IN') {
+            setUser(session?.user || null)
+          } else if (event === 'USER_UPDATED') {
+            setUser(session?.user || null)
+          }
+          
+          if (session?.user?.email) {
+            setUserEmail(session.user.email)
+          } else {
+            setUserEmail('')
+          }
+          
+          setLoading(false)
+        }
+      )
+  
+      return () => {
+        subscription?.unsubscribe()
+      }
+    }, []) // Empty dependency array - only runs once on mount
 
   useEffect(() => {
     let index = isErasing ? texts[currentTextIndex].length : 0;
@@ -49,9 +111,172 @@ export default function Home() {
     return () => clearInterval(timer);
   }, [currentTextIndex, isErasing]);
 
+  // Get user session
+  useEffect(() => {
+    const getSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error('Session error:', error)
+          return
+        }
+        setUser(session?.user || null)
+      } catch (error) {
+        console.error('Error getting session:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    getSession()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setUser(session?.user || null)
+        setLoading(false)
+      }
+    )
+
+    return () => {
+      subscription?.unsubscribe()
+    }
+  }, [])
+
+  // Audio recording effects
+
+  // Upload file to Supabase Storage
+  const uploadFileToStorage = async (file: File): Promise<string | null> => {
+    try {
+      // Check if user is authenticated
+      if (!user?.id) {
+        console.error('User not authenticated');
+        return null;
+      }
+
+      // Clean filename and add user ID for organization
+      const fileExt = file.name.split('.').pop();
+      const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+      const fileName = `${user.id}/${Date.now()}-${cleanFileName}`;
+
+      console.log('Uploading file:', {
+        originalName: file.name,
+        fileName: fileName,
+        size: file.size,
+        type: file.type
+      });
+
+      const { data, error } = await supabase.storage
+        .from('image')
+        .upload(fileName, file, {
+          cacheControl: '3600',
+          upsert: false
+        });
+
+      if (error) {
+        console.error('Supabase storage error:', error);
+        return null;
+      }
+
+      console.log('Upload successful:', data);
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('image')
+        .getPublicUrl(fileName);
+
+      console.log('Public URL generated:', publicUrl);
+      return publicUrl;
+
+    } catch (error) {
+      console.error('Error in uploadFileToStorage:', error);
+      return null;
+    }
+  };
+
+  // Handle image selection
+  const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files) return;
+
+    const newFiles = Array.from(files).slice(0, 4 - selectedImages.length); // Limit to 4 images total
+    
+    newFiles.forEach(file => {
+      if (file.size > 10 * 1024 * 1024) { // 10MB limit
+        alert('Image size must be less than 10MB');
+        return;
+      }
+      
+      if (!file.type.startsWith('image/')) {
+        alert('Please select only image files');
+        return;
+      }
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setImagePreviews(prev => [...prev, result]);
+      };
+      reader.readAsDataURL(file);
+    });
+
+    setSelectedImages(prev => [...prev, ...newFiles]);
+  };
+
+  // Remove selected image
+  const removeImage = (index: number) => {
+    setSelectedImages(prev => prev.filter((_, i) => i !== index));
+    setImagePreviews(prev => prev.filter((_, i) => i !== index));
+  };
+
+  // Click image upload button
+  const handleImageUpload = () => {
+    fileInputRef.current?.click();
+  };
+
+  // Voice recording functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          setAudioChunks(prev => [...prev, event.data]);
+        }
+      };
+      
+      recorder.onstop = () => {
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      setMediaRecorder(recorder);
+      setIsRecording(true);
+      recorder.start();
+    } catch (error) {
+      console.error('Error accessing microphone:', error);
+      alert('Could not access microphone. Please check permissions.');
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+      mediaRecorder.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const handleVoiceRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
   const handleStartPlanning = async () => {
-    if (!inputValue.trim()) {
-      setError('Please describe your travel plans');
+    if (!inputValue.trim() && selectedImages.length === 0) {
+      setError('Please describe your travel plans or upload images');
       return;
     }
 
@@ -59,30 +284,50 @@ export default function Home() {
     setError(null);
 
     try {
-      console.log('🚀 Starting planning with message:', inputValue);
+      console.log('Starting planning with message:', inputValue);
+      console.log('Selected images:', selectedImages.length);
       
-      // Create a new conversation
+      const imageUrls: string[] = [];
+      
+      if (selectedImages.length > 0) {
+        console.log('Uploading images to storage...');
+        
+        for (const file of selectedImages) {
+          const uploadedUrl = await uploadFileToStorage(file);
+          if (uploadedUrl) {
+            imageUrls.push(uploadedUrl);
+          } else {
+            console.error('Failed to upload image:', file.name);
+          }
+        }
+        
+        console.log('Uploaded image URLs:', imageUrls);
+      }
+      
       const conversationData = await chatAPI.createConversation();
       console.log('✅ Created conversation:', conversationData.conversationId);
       
-      // Store the initial message and conversation ID in sessionStorage
       sessionStorage.setItem('initialMessage', inputValue);
       sessionStorage.setItem('newConversationId', conversationData.conversationId);
       
-      console.log('💾 Stored in sessionStorage:', {
+      if (imageUrls.length > 0) {
+        sessionStorage.setItem('initialImages', JSON.stringify(imageUrls));
+      }
+      
+      console.log('Stored in sessionStorage:', {
         initialMessage: inputValue,
-        conversationId: conversationData.conversationId
+        conversationId: conversationData.conversationId,
+        imageUrls: imageUrls.length
       });
       
       // Small delay to ensure sessionStorage is set
       await new Promise(resolve => setTimeout(resolve, 100));
       
-      // Redirect to chat page with the new conversation
       console.log('🔄 Redirecting to chat page...');
       router.push(`/chat/${conversationData.conversationId}`);
       
     } catch (error) {
-      console.error('❌ Failed to start planning:', error);
+      console.error('Failed to start planning:', error);
       setError(handleAPIError(error));
       setIsLoading(false);
     }
@@ -101,10 +346,19 @@ export default function Home() {
 
   return (
     <div className="home">
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImageSelect}
+        accept="image/*"
+        multiple
+        className="hidden"
+      />
+
       <div className="mesh-background h-screen">
         <nav className='absolute top-0 left-0 right-0 z-10 items-center justify-between flex pt-6 px-15'>
           <Link href='/'><h2 className='font-poppins font-semibold text-2xl'>TripTailor</h2></Link>
-          <Link href='/log-in' className="font-andika text-md">LOG IN</Link>
+          {userEmail ? (<Link href='/chat/new'>{userEmail}</Link>) : (<Link href='/log-in' className="font-andika text-md">LOG IN</Link>)}
         </nav>
         
         <div className="cta drop-shadow-xs flex flex-col items-center gap-6 justify-center h-full">
@@ -113,7 +367,32 @@ export default function Home() {
             with your smart travel sidekick.
           </h1>
           
-          <div className="chatbot w-[43rem] h-[10rem] rounded-3xl bg-[#FFF] shadow-lg">
+          <div className="chatbot w-[43rem] rounded-3xl bg-[#FFF] shadow-lg">
+            
+
+            {/* Image previews */}
+            {imagePreviews.length > 0 && (
+              <div className="mx-5 mt-4">
+                <div className="flex flex-wrap gap-2">
+                  {imagePreviews.map((preview, index) => (
+                    <div key={index} className="relative">
+                      <img
+                        src={preview}
+                        alt={`Preview ${index + 1}`}
+                        className="w-20 h-20 object-cover rounded-lg border border-gray-200"
+                      />
+                      <button
+                        onClick={() => removeImage(index)}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <textarea 
               placeholder={inputValue ? "" : placeholder}
               value={inputValue}
@@ -124,37 +403,35 @@ export default function Home() {
               disabled={isLoading}
             />          
             
-            <div className="icons flex items-center justify-between px-5 pt-2">
-              <button className="hover:cursor-pointer">
-              <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
-                <path d="M3.625 7.625C3.625 5.41586 5.41586 3.625 7.625 3.625H21.375C23.5841 3.625 25.375 5.41586 25.375 7.625V21.375C25.375 23.5841 23.5841 25.375 21.375 25.375H7.625C5.41586 25.375 3.625 23.5841 3.625 21.375V7.625Z" stroke="#222222" strokeWidth="2"/>
-                <path d="M3.625 18.125L7.368 14.382C8.25033 13.4997 9.7163 13.6318 10.4266 14.6578L13.2664 18.7596C13.9311 19.7197 15.2735 19.9085 16.1773 19.1691L19.745 16.2501C20.5402 15.5995 21.6991 15.6573 22.4257 16.3839L25.375 19.3333" stroke="#222222" strokeWidth="2"/>
-                <circle cx="19.3333" cy="9.66667" r="2.41667" fill="#222222"/>
-              </svg>
-              </button>
-
-    <div className="flex gap-2">
-                <button className="hover:cursor-pointer">
+            <div className="icons flex items-center justify-between px-5 pt-2 pb-4">
+              <button 
+                onClick={handleImageUpload}
+                className="hover:cursor-pointer transition-opacity hover:opacity-70"
+                disabled={isLoading || !userEmail || selectedImages.length >= 1}
+              >
                 <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
-                  <rect x="10.875" y="3.625" width="7.25" height="13.2917" rx="3" stroke="#222222" strokeWidth="2" stroke-linejoin="round"/>
-                  <path d="M6.25 13.2917C6.25 15.4797 7.11919 17.5781 8.66637 19.1253C10.2135 20.6725 12.312 21.5417 14.5 21.5417C16.688 21.5417 18.7865 20.6725 20.3336 19.1253C21.8808 17.5781 22.75 15.4797 22.75 13.2917" stroke="#222222" strokeWidth="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <path d="M14.5 25.375V22.9583" stroke="#222222" strokeWidth="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M3.625 7.625C3.625 5.41586 5.41586 3.625 7.625 3.625H21.375C23.5841 3.625 25.375 5.41586 25.375 7.625V21.375C25.375 23.5841 23.5841 25.375 21.375 25.375H7.625C5.41586 25.375 3.625 23.5841 3.625 21.375V7.625Z" stroke="#222222" strokeWidth="2"/>
+                  <path d="M3.625 18.125L7.368 14.382C8.25033 13.4997 9.7163 13.6318 10.4266 14.6578L13.2664 18.7596C13.9311 19.7197 15.2735 19.9085 16.1773 19.1691L19.745 16.2501C20.5402 15.5995 21.6991 15.6573 22.4257 16.3839L25.375 19.3333" stroke="#222222" strokeWidth="2"/>
+                  <circle cx="19.3333" cy="9.66667" r="2.41667" fill="#222222"/>
                 </svg>
               </button>
 
-              <button 
-                onClick={handleStartPlanning}
-                disabled={!inputValue.trim() || isLoading}
-                className="hover:cursor-pointer transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed"
-              >
-                {isLoading ? (
-                  <div className="w-7 h-7 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
-                    <path d="M19.4354 0.581983C18.9352 0.0685981 18.1949 -0.122663 17.5046 0.0786645L1.408 4.75952C0.679698 4.96186 0.163487 5.54269 0.0244302 6.28055C-0.117628 7.0315 0.378575 7.98479 1.02684 8.38342L6.0599 11.4768C6.57611 11.7939 7.24239 11.7144 7.66956 11.2835L13.4329 5.4843C13.723 5.18231 14.2032 5.18231 14.4934 5.4843C14.7835 5.77623 14.7835 6.24935 14.4934 6.55134L8.71999 12.3516C8.29181 12.7814 8.21178 13.4508 8.52691 13.9702L11.6022 19.0538C11.9623 19.6577 12.5826 20 13.2628 20C13.3429 20 13.4329 20 13.513 19.9899C14.2933 19.8893 14.9135 19.3558 15.1436 18.6008L19.9156 2.52479C20.1257 1.84028 19.9356 1.09537 19.4354 0.581983" fill="black"/>
-                  </svg>
-                )}
-              </button>
+              <div className="flex gap-2">
+
+
+                <button 
+                  onClick={handleStartPlanning}
+                  disabled={(!inputValue.trim() && selectedImages.length === 0) || isLoading}
+                  className="hover:cursor-pointer transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? (
+                    <div className="w-7 h-7 border-2 border-gray-400 border-t-transparent rounded-full animate-spin"></div>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                      <path d="M19.4354 0.581983C18.9352 0.0685981 18.1949 -0.122663 17.5046 0.0786645L1.408 4.75952C0.679698 4.96186 0.163487 5.54269 0.0244302 6.28055C-0.117628 7.0315 0.378575 7.98479 1.02684 8.38342L6.0599 11.4768C6.57611 11.7939 7.24239 11.7144 7.66956 11.2835L13.4329 5.4843C13.723 5.18231 14.2032 5.18231 14.4934 5.4843C14.7835 5.77623 14.7835 6.24935 14.4934 6.55134L8.71999 12.3516C8.29181 12.7814 8.21178 13.4508 8.52691 13.9702L11.6022 19.0538C11.9623 19.6577 12.5826 20 13.2628 20C13.3429 20 13.4329 20 13.513 19.9899C14.2933 19.8893 14.9135 19.3558 15.1436 18.6008L19.9156 2.52479C20.1257 1.84028 19.9356 1.09537 19.4354 0.581983" fill="black"/>
+                    </svg>
+                  )}
+                </button>
               </div>
             </div>
 
@@ -181,6 +458,7 @@ export default function Home() {
                 </button>
               ))}
             </div>
+            <p className="text-center text-gray-600 mt-4 font-medium">For image functionality log in.</p>
           </div>
         </div>
       </div>

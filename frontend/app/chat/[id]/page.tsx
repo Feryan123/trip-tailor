@@ -7,6 +7,7 @@ import Markdown from 'react-markdown'
 import supabase from '@/lib/supabaseClient';
 import { describeImage } from '@/lib/imageDescriber';
 
+
 interface Message {
   id: string;
   content: string;
@@ -954,6 +955,28 @@ const handleSendMessage = async () => {
             )}
           </div>
         </div>
+        {/* Profile Section - fixed bottom left corner */}
+          <div className="fixed bottom-0 left-0 w-80 z-50 bg-gray-50 border-t border-gray-200 p-4 flex flex-col gap-2">
+            {userEmail && (
+              <button
+                onClick={handleLogout}
+                className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors border border-red-200 bg-white"
+              >
+                <LogOut size={16} className="inline mr-2" />
+                Log Out
+              </button>
+            )}
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-white">
+              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                <User size={16} className="text-white" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-gray-900 truncate">
+                  {user ? (user.email) : (<Link href='/log-in'>Log in</Link>)}
+                </div>
+              </div>
+            </div>
+          </div>
       </div>
 
       <div className="flex-1 flex flex-col min-w-0">
@@ -1118,7 +1141,7 @@ const handleSendMessage = async () => {
                 <button 
                   onClick={handleImageUpload}
                   className="hover:cursor-pointer transition-opacity hover:opacity-70"
-                  disabled={isLoading || selectedImages.length >= 4}
+                  disabled={isLoading || !userEmail || selectedImages.length >= 1}
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
                     <path d="M3.625 7.625C3.625 5.41586 5.41586 3.625 7.625 3.625H21.375C23.5841 3.625 25.375 5.41586 25.375 7.625V21.375C25.375 23.5841 23.5841 25.375 21.375 25.375H7.625C5.41586 25.375 3.625 23.5841 3.625 21.375V7.625Z" stroke="#222222" strokeWidth="2"/>
@@ -1127,20 +1150,11 @@ const handleSendMessage = async () => {
                   </svg>
                 </button>
                 <div className="flex gap-3">
-                    <button onClick={handleVoiceRecording}
-                    className={`hover:cursor-pointer transition-all duration-200 hover:scale-105 ${
-                    isRecording ? 'bg-red-500 text-white rounded-full p-2' : 'hover:opacity-70'
-                    }`}
-                    disabled={isLoading}>
-                    <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
-                    <rect x="10.875" y="3.625" width="7.25" height="13.2917" rx="3" stroke={isRecording ? "white" : "#222222"} strokeWidth="2" strokeLinejoin="round"/>
-                    <path d="M6.25 13.2917C6.25 15.4797 7.11919 17.5781 8.66637 19.1253C10.2135 20.6725 12.312 21.5417 14.5 21.5417C16.688 21.5417 18.7865 20.6725 20.3336 19.1253C21.8808 17.5781 22.75 15.4797 22.75 13.2917" stroke={isRecording ? "white" : "#222222"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    <path d="M14.5 25.375V22.9583" stroke={isRecording ? "white" : "#222222"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg></button>
+                    
                     <button 
                     onClick={handleSendMessage}
                     disabled={(!inputValue.trim() && selectedImages.length === 0) || isLoading}
-                    className="hover:cursor-pointer transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2"
+                    className="hover:cursor-pointer transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed text-black rounded-full p-2"
                     >
                         {isLoading ? (
                           <Loader2 className="w-5 h-5 animate-spin" />

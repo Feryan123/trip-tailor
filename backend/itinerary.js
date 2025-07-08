@@ -10,13 +10,11 @@ const { z } = require('zod');
 require('dotenv').config();
 
 const app = express();
-// Changed port to 8000 to avoid conflict with Next.js frontend
 const PORT = process.env.PORT || 8000;
 
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// Enhanced CORS configuration
 app.use(cors({
   origin: ['http://localhost:3000', 'http://127.0.0.1:3000'],
   credentials: true
@@ -38,7 +36,6 @@ const llm = new ChatGroq({
   maxTokens: 2000,
 });
 
-// Enhanced error logging function
 function logSerpAPIError(toolName, error, params) {
   console.error(`❌ ${toolName} Error:`, {
     message: error.message,
@@ -49,7 +46,6 @@ function logSerpAPIError(toolName, error, params) {
   });
 }
 
-// API validation function
 async function validateSerpAPI() {
   if (!SERPAPI_KEY) {
     console.warn('⚠️ SERPAPI_KEY not found - using fallback mode');
@@ -74,7 +70,6 @@ async function validateSerpAPI() {
   }
 }
 
-// Enhanced SerpAPI Tools with fallback mechanisms
 const searchPlacesTool = new DynamicTool({
   name: 'search_places',
   description: 'Search for tourist attractions, landmarks, and places of interest in a specific location',
@@ -224,7 +219,6 @@ const searchHotelsTool = new DynamicTool({
     } catch (error) {
       logSerpAPIError('Hotels Search', error, params);
       
-      // Fallback recommendations
       const fallbackHotels = [
         {
           name: `${location} Central Hotel`,
@@ -574,14 +568,17 @@ AVAILABLE TOOLS:
 - search_weather: Get weather information for travel dates
 
 RESPONSE FORMAT:
-Create detailed day-by-day itineraries with:
+Create detailed day-by-day itineraries in Markdown format with:
 - Suggested times for each activity (e.g., "Morning: 9:00 AM - 12:00 PM")
 - Specific locations with booking information
+- Use bullet points for clarity. 
+- Include links to booking sites and resources
+- Don't use too much whitespace; keep it concise
 - Transportation suggestions between locations
 - Budget considerations for each activity
 - Alternative options for different weather/preferences
 - Local tips and cultural insights
-- Booking recommendations and websites
+- Specific booking recommendations and websites
 
 IMPORTANT NOTES:
 - When API data is limited, acknowledge this and provide general recommendations
@@ -720,7 +717,7 @@ function extractBasicTravelInfo(message) {
     basicInfo.specialRequirements = 'business trip';
   }
   
-  console.log('🔄 Fallback extraction result:', basicInfo);
+  console.log('Fallback extraction result:', basicInfo);
   return basicInfo;
 }
 
@@ -728,13 +725,13 @@ async function gatherTravelData(state) {
   const { travelDetails } = state;
   const toolResults = {};
   
-  console.log('📊 Starting data gathering phase...');
-  console.log('🔍 Travel details received:', JSON.stringify(travelDetails, null, 2));
+  console.log('Starting data gathering phase...');
+  console.log('Travel details received:', JSON.stringify(travelDetails, null, 2));
   
   try {
     // Always search for weather if destination is specified
     if (travelDetails.toLocation && travelDetails.toLocation !== "not specified") {
-      console.log(`🌤️ Getting weather for ${travelDetails.toLocation}`);
+      console.log(`Getting weather for ${travelDetails.toLocation}`);
       try {
         const weatherResult = await searchWeatherTool.func({
           location: travelDetails.toLocation,
@@ -742,7 +739,7 @@ async function gatherTravelData(state) {
         });
         toolResults.weather = JSON.parse(weatherResult);
       } catch (error) {
-        console.error('❌ Weather search failed:', error.message);
+        console.error('Weather search failed:', error.message);
         toolResults.weather = { error: 'Weather data unavailable' };
       }
     }
@@ -762,7 +759,7 @@ async function gatherTravelData(state) {
         });
         toolResults.flights = JSON.parse(flightResult);
       } catch (error) {
-        console.error('❌ Flight search failed:', error.message);
+        console.error('Flight search failed:', error.message);
         toolResults.flights = { error: 'Flight data unavailable' };
       }
     }
@@ -786,7 +783,7 @@ async function gatherTravelData(state) {
     
     // Search for attractions
     if (travelDetails.toLocation && travelDetails.toLocation !== "not specified") {
-      console.log(`🏛️ Getting attractions for ${travelDetails.toLocation}`);
+      console.log(`Getting attractions for ${travelDetails.toLocation}`);
       try {
         const attractionsResult = await searchPlacesTool.func({
           query: 'tourist attractions museums landmarks',
@@ -801,7 +798,7 @@ async function gatherTravelData(state) {
     
     // Search for restaurants
     if (travelDetails.toLocation && travelDetails.toLocation !== "not specified") {
-      console.log(`🍽️ Getting restaurants for ${travelDetails.toLocation}`);
+      console.log(`Getting restaurants for ${travelDetails.toLocation}`);
       
       // Safe budget parsing
       let priceRange = '';
@@ -812,10 +809,10 @@ async function gatherTravelData(state) {
           const budgetNum = parseInt(budgetStr);
           if (!isNaN(budgetNum)) {
             priceRange = budgetNum > 2000 ? 'luxury' : 'mid-range';
-            console.log(`💰 Budget parsed: ${budgetNum} → ${priceRange} price range`);
+            console.log(`Budget parsed: ${budgetNum} → ${priceRange} price range`);
           }
         } catch (error) {
-          console.warn('⚠️ Could not parse budget:', travelDetails.budget);
+          console.warn('Could not parse budget:', travelDetails.budget);
           priceRange = 'mid-range'; // Default fallback
         }
       }
@@ -828,7 +825,7 @@ async function gatherTravelData(state) {
         });
         toolResults.restaurants = JSON.parse(restaurantsResult);
       } catch (error) {
-        console.error('❌ Restaurant search failed:', error.message);
+        console.error('Restaurant search failed:', error.message);
         toolResults.restaurants = { error: 'Restaurant data unavailable' };
       }
     }
@@ -840,7 +837,7 @@ async function gatherTravelData(state) {
       currentStep: 'creating_itinerary'
     };
   } catch (error) {
-    console.error('❌ Error gathering travel data:', error);
+    console.error('Error gathering travel data:', error);
     return {
       toolResults: { error: 'Failed to gather travel data', details: error.message },
       currentStep: 'creating_itinerary'
@@ -852,7 +849,7 @@ async function createItinerary(state) {
   const { messages, travelDetails, toolResults } = state;
   const lastMessage = messages[messages.length - 1];
   
-  console.log('📝 Creating itinerary...');
+  console.log('Creating itinerary...');
   
   const itineraryPrompt = `
   Create a detailed travel itinerary based on this request: "${lastMessage.content}"
