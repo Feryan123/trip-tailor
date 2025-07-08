@@ -1,16 +1,22 @@
 "use client";
 import React, { useState, useRef, useEffect, use } from 'react';
-import { Menu, Plus, MessageSquare, X, Loader2, LogOut, User } from 'lucide-react';
+import { Menu, Plus, MessageSquare, X, Loader2, LogOut, User, ImageIcon, Trash2 } from 'lucide-react';
 import Link from 'next/link';
 import { chatAPI, handleAPIError } from '@/lib/api';
 import Markdown from 'react-markdown'
 import supabase from '@/lib/supabaseClient';
+import { describeImage } from '@/lib/imageDescriber';
 
 interface Message {
   id: string;
   content: string;
   isUser: boolean;
   timestamp: string; // Changed to string for better JSON serialization
+  images?: string[]; // Array of image URLs or base64 strings
+  hasImage?: boolean;
+  imageName?: string;
+  imageProcessed?: boolean;
+  toolsUsed?: string[];
 }
 
 interface ChatHistory {
@@ -858,6 +864,16 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   return (
     <div className="h-screen bg-white flex">
+      {/* Hidden file input */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleImageSelect}
+        accept="image/*"
+        multiple
+        className="hidden"
+      />
+
       <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} fixed inset-y-0 left-0 z-50 w-80 bg-gray-50 border-r border-gray-200 transition-transform duration-300 ease-in-out lg:translate-x-0 lg:static lg:inset-0`}>
         <div className="flex flex-col h-full">
           <div className="flex items-center justify-between p-4 border-b border-gray-200">
@@ -909,48 +925,6 @@ export default function ChatPage({ params }: ChatPageProps) {
               ))
             )}
           </div>
-
-          {/* Profile Section */}
-          <div className="border-t border-gray-200 p-4">
-            {/* Always visible logout button for testing */}
-            {userEmail && (
-              <button
-                onClick={handleLogout}
-                className="mb-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors z-50 border border-red-200 bg-white"
-              >
-                <LogOut size={16} className="inline mr-2" />
-                Log Out (Test Button)
-              </button>
-            )}
-            <div className="relative group">
-              <div
-                className="flex items-center gap-3 p-3 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"
-                onMouseEnter={() => setShowLogout(true)}
-                onMouseLeave={() => setShowLogout(false)}
-              >
-                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
-                  <User size={16} className="text-white" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="text-sm font-medium text-gray-900 truncate">
-                    {user ? (user.email) : (<Link href='/log-in'>Log in</Link>)}
-                  </div>
-                </div>
-              </div>
-              {/* Logout Button - appears on hover */}
-              {showLogout && userEmail && (
-                <button
-                  onClick={handleLogout}
-                  className="absolute right-0 top-full mt-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors z-50"
-                  onMouseEnter={() => setShowLogout(true)}
-                  onMouseLeave={() => setShowLogout(false)}
-                >
-                  <LogOut size={16} className="inline mr-2" />
-                  Logout
-                </button>
-              )}
-            </div>
-          </div>
         </div>
       </div>
 
@@ -995,7 +969,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                   What's your next trip?
                 </h2>
                 <p className="text-gray-600 max-w-md">
-                  Let TripTailor help you plan your next adventure. Start by typing your travel plans.
+                  Let TripTailor help you plan your next adventure. Start by typing your travel plans or upload images of places you'd like to visit.
                 </p>
                 {process.env.NODE_ENV === 'development' && (
                   <div className="mt-4 text-sm text-gray-500">
@@ -1019,6 +993,21 @@ export default function ChatPage({ params }: ChatPageProps) {
                           : 'bg-gray-100 text-black'
                       }`}
                     >
+                      {/* Display images if present */}
+                      {message.images && message.images.length > 0 && (
+                        <div className="mb-3">
+                          <div className="grid grid-cols-2 gap-2">
+                            {message.images.map((image, index) => (
+                              <img
+                                key={index}
+                                src={image}
+                                alt={`Uploaded image ${index + 1}`}
+                                className="rounded-lg max-w-full h-auto max-h-48 object-cover"
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )}
                       <div className="text-sm leading-relaxed whitespace-pre-wrap">
                         {message.isUser ? (
                           message.content
@@ -1028,7 +1017,6 @@ export default function ChatPage({ params }: ChatPageProps) {
                       </div>
                     </div>
                     <div className="text-xs text-gray-500 mt-1 px-2">
-                      {formatMessageTime(message.timestamp)}
                     </div>
                   </div>
                 </div>
@@ -1058,6 +1046,34 @@ export default function ChatPage({ params }: ChatPageProps) {
 
         <div className="border-t border-gray-200 px-4 py-4 bg-white">
           <div className="max-w-4xl mx-auto">
+            {/* Image previews */}
+            {isRecording && (
+             <div className="mb-2 flex items-center gap-2 text-red-600">
+             <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse"></div>
+              <span className="text-sm">Recording...</span>
+             </div>)}
+            {imagePreviews.length > 0 && (
+              <div className="mb-4">
+                <div className="flex flex-wrap gap-2">
+                  {imagePreviews.map((preview, index) => (
+                    <div key={index} className="relative">
+                      <img
+                        src={preview}
+                        alt={`Preview ${index + 1}`}
+                        className="w-20 h-20 object-cover rounded-lg border border-gray-200"
+                      />
+                      <button
+                        onClick={() => removeImage(index)}
+                        className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 hover:bg-red-600 transition-colors"
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="max-w-3xl mx-auto h-40 rounded-3xl bg-white border border-gray-300 shadow-sm">
               <textarea
                 ref={textareaRef}
@@ -1071,7 +1087,11 @@ export default function ChatPage({ params }: ChatPageProps) {
               />
               
               <div className="flex items-center justify-between px-5 pt-0">
-                <button className="hover:cursor-pointer transition-opacity hover:opacity-70">
+                <button 
+                  onClick={handleImageUpload}
+                  className="hover:cursor-pointer transition-opacity hover:opacity-70"
+                  disabled={isLoading || selectedImages.length >= 4}
+                >
                   <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
                     <path d="M3.625 7.625C3.625 5.41586 5.41586 3.625 7.625 3.625H21.375C23.5841 3.625 25.375 5.41586 25.375 7.625V21.375C25.375 23.5841 23.5841 25.375 21.375 25.375H7.625C5.41586 25.375 3.625 23.5841 3.625 21.375V7.625Z" stroke="#222222" strokeWidth="2"/>
                     <path d="M3.625 18.125L7.368 14.382C8.25033 13.4997 9.7163 13.6318 10.4266 14.6578L13.2664 18.7596C13.9311 19.7197 15.2735 19.9085 16.1773 19.1691L19.745 16.2501C20.5402 15.5995 21.6991 15.6573 22.4257 16.3839L25.375 19.3333" stroke="#222222" strokeWidth="2"/>
@@ -1079,26 +1099,29 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </svg>
                 </button>
                 <div className="flex gap-3">
-                  <button className="hover:cursor-pointer transition-opacity hover:opacity-70">
+                    <button onClick={handleVoiceRecording}
+                    className={`hover:cursor-pointer transition-all duration-200 hover:scale-105 ${
+                    isRecording ? 'bg-red-500 text-white rounded-full p-2' : 'hover:opacity-70'
+                    }`}
+                    disabled={isLoading}>
                     <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
-                      <rect x="10.875" y="3.625" width="7.25" height="13.2917" rx="3" stroke="#222222" strokeWidth="2" strokeLinejoin="round"/>
-                      <path d="M6.25 13.2917C6.25 15.4797 7.11919 17.5781 8.66637 19.1253C10.2135 20.6725 12.312 21.5417 14.5 21.5417C16.688 21.5417 18.7865 20.6725 20.3336 19.1253C21.8808 17.5781 22.75 15.4797 22.75 13.2917" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                      <path d="M14.5 25.375V22.9583" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  </button>
-                  <button 
+                    <rect x="10.875" y="3.625" width="7.25" height="13.2917" rx="3" stroke={isRecording ? "white" : "#222222"} strokeWidth="2" strokeLinejoin="round"/>
+                    <path d="M6.25 13.2917C6.25 15.4797 7.11919 17.5781 8.66637 19.1253C10.2135 20.6725 12.312 21.5417 14.5 21.5417C16.688 21.5417 18.7865 20.6725 20.3336 19.1253C21.8808 17.5781 22.75 15.4797 22.75 13.2917" stroke={isRecording ? "white" : "#222222"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    <path d="M14.5 25.375V22.9583" stroke={isRecording ? "white" : "#222222"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg></button>
+                    <button 
                     onClick={handleSendMessage}
-                    disabled={!inputValue.trim() || isLoading}
+                    disabled={(!inputValue.trim() && selectedImages.length === 0) || isLoading}
                     className="hover:cursor-pointer transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2"
-                  >
-                    {isLoading ? (
-                      <Loader2 className="w-5 h-5 animate-spin" />
-                    ) : (
-                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
-                        <path d="M19.4354 0.581983C18.9352 0.0685981 18.1949 -0.122663 17.5046 0.0786645L1.408 4.75952C0.679698 4.96186 0.163487 5.54269 0.0244302 6.28055C-0.117628 7.0315 0.378575 7.98479 1.02684 8.38342L6.0599 11.4768C6.57611 11.7939 7.24239 11.7144 7.66956 11.2835L13.4329 5.4843C13.723 5.18231 14.2032 5.18231 14.4934 5.4843C14.7835 5.77623 14.7835 6.24935 14.4934 6.55134L8.71999 12.3516C8.29181 12.7814 8.21178 13.4508 8.52691 13.9702L11.6022 19.0538C11.9623 19.6577 12.5826 20 13.2628 20C13.3429 20 13.4329 20 13.513 19.9899C14.2933 19.8893 14.9135 19.3558 15.1436 18.6008L19.9156 2.52479C20.1257 1.84028 19.9356 1.09537 19.4354 0.581983" fill="currentColor"/>
-                      </svg>
-                    )}
-                  </button>
+                    >
+                        {isLoading ? (
+                          <Loader2 className="w-5 h-5 animate-spin" />
+                        ) : (
+                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                            <path d="M19.4354 0.581983C18.9352 0.0685981 18.1949 -0.122663 17.5046 0.0786645L1.408 4.75952C0.679698 4.96186 0.163487 5.54269 0.0244302 6.28055C-0.117628 7.0315 0.378575 7.98479 1.02684 8.38342L6.0599 11.4768C6.57611 11.7939 7.24239 11.7144 7.66956 11.2835L13.4329 5.4843C13.723 5.18231 14.2032 5.18231 14.4934 5.4843C14.7835 5.77623 14.7835 6.24935 14.4934 6.55134L8.71999 12.3516C8.29181 12.7814 8.21178 13.4508 8.52691 13.9702L11.6022 19.0538C11.9623 19.6577 12.5826 20 13.2628 20C13.3429 20 13.4329 20 13.513 19.9899C14.2933 19.8893 14.9135 19.3558 15.1436 18.6008L19.9156 2.52479C20.1257 1.84028 19.9356 1.09537 19.4354 0.581983" fill="currentColor"/>
+                          </svg>
+                        )}
+                    </button>
                 </div>
               </div>
             </div>
