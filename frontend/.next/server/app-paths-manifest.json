@@ -1,9 +1,5 @@
 {
   "/_not-found/page": "app/_not-found/page.js",
-  "/auth/callback/page": "app/auth/callback/page.js",
   "/chat/[id]/page": "app/chat/[id]/page.js",
-  "/favicon.ico/route": "app/favicon.ico/route.js",
-  "/log-in/page": "app/log-in/page.js",
-  "/page": "app/page.js",
-  "/sign-up/page": "app/sign-up/page.js"
+  "/favicon.ico/route": "app/favicon.ico/route.js"
 }
