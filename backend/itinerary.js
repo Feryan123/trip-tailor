@@ -1140,3 +1140,5 @@ app.listen(PORT, async () => {
   console.log(`📍 Visit http://localhost:${PORT}/health for status check`);
   console.log(`🧪 Visit http://localhost:${PORT}/api/test-serpapi for API testing`);
 });
+
+module.exports = app;
