@@ -10,7 +10,7 @@ interface Message {
   id: string;
   content: string;
   isUser: boolean;
-  timestamp: Date;
+  timestamp: string; // Changed to string for better JSON serialization
 }
 
 interface ChatHistory {
@@ -26,6 +26,7 @@ interface ChatPageProps {
   }>;
 }
 
+// chat/.... 
 export default function ChatPage({ params }: ChatPageProps) {
   const { id } = use(params);
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -37,13 +38,12 @@ export default function ChatPage({ params }: ChatPageProps) {
   const [currentChatId, setCurrentChatId] = useState<string | null>(id);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const [initializing, setInitializing] = useState(true);
-  const [userEmail, setUserEmail] = useState<string>(''); // You'll need to get this from your auth context
+  const [userEmail, setUserEmail] = useState<string>('');
   const [showLogout, setShowLogout] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const [user, setUser] = useState<any>(null); // Replace 'any' with your user type
+  const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -58,59 +58,80 @@ export default function ChatPage({ params }: ChatPageProps) {
   }, [id]);
 
   useEffect(() => {
-    loadChatHistory();
-  }, []);
+    if (user?.id) {
+      loadChatHistory();
+    }
+  }, [user]);
 
   useEffect(() => {
-        const getSession = async () => {
-            try {
-                const { data: { session }, error } = await supabase.auth.getSession()
-                
-                if (error) {
-                    console.error('Session error:', error)
-                    return
-                }
-                console.log('Session:', session)
-                setUser(session?.user || null)
-            } catch (error) {
-                console.error('Error getting session:', error)
-            } finally {
-                setLoading(false)
-            }
+    const getSession = async () => {
+      try {
+        const { data: { session }, error } = await supabase.auth.getSession()
+        
+        if (error) {
+          console.error('Session error:', error)
+          return
         }
-
-        getSession()
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            (event, session) => {
-                console.log('Auth state changed:', event, session)
-                
-                if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
-                    setUser(session?.user || null)
-                } else if (event === 'SIGNED_IN') {
-                    setUser(session?.user || null)
-                } else if (event === 'USER_UPDATED') {
-                    setUser(session?.user || null)
-                }
-                
-                setLoading(false)
-            }
-        )
-
-        let sessionCheckInterval;
-        if (user) {
-            sessionCheckInterval = setInterval(() => {
-                validateSession();
-            }, 5 * 60 * 1000); // 5 minutes
+        console.log('Session:', session)
+        setUser(session?.user || null)
+        if (session?.user?.email) {
+          setUserEmail(session.user.email)
         }
+      } catch (error) {
+        console.error('Error getting session:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
 
-        return () => {
-            subscription?.unsubscribe()
-            if (sessionCheckInterval) {
-                clearInterval(sessionCheckInterval)
-            }
+    getSession()
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        console.log('Auth state changed:', event, session)
+        
+        if (event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+          setUser(session?.user || null)
+        } else if (event === 'SIGNED_IN') {
+          setUser(session?.user || null)
+        } else if (event === 'USER_UPDATED') {
+          setUser(session?.user || null)
         }
-    }, [user]) 
+        
+        if (session?.user?.email) {
+          setUserEmail(session.user.email)
+        }
+        
+        setLoading(false)
+      }
+    )
+
+    let sessionCheckInterval: NodeJS.Timeout;
+    if (user) {
+      sessionCheckInterval = setInterval(() => {
+        validateSession();
+      }, 5 * 60 * 1000); // 5 minutes
+    }
+
+    return () => {
+      subscription?.unsubscribe()
+      if (sessionCheckInterval) {
+        clearInterval(sessionCheckInterval)
+      }
+    }
+  }, [user])
+
+  const validateSession = async () => {
+    try {
+      const { data: { session }, error } = await supabase.auth.getSession()
+      if (error || !session) {
+        setUser(null)
+        setUserEmail('')
+      }
+    } catch (error) {
+      console.error('Session validation error:', error)
+    }
+  }
 
   const initializeConversation = async () => {
     setInitializing(true);
@@ -154,13 +175,30 @@ export default function ChatPage({ params }: ChatPageProps) {
       id: Date.now().toString(),
       content: message,
       isUser: true,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     };
 
     setMessages([userMessage]);
     setIsLoading(true);
 
     try {
+      // First, save the conversation with initial user message to Supabase
+      if (user?.id) {
+        const { error: insertError } = await supabase
+          .from('Conversation')
+          .insert({
+            id: convId,
+            user: user.id,
+            messages: [userMessage],
+            created_at: new Date().toISOString()
+          });
+
+        if (insertError) {
+          console.error('Error inserting conversation:', insertError);
+        }
+      }
+
+      // Send message to AI API
       const data = await chatAPI.sendMessage({
         message: message,
         conversationId: convId
@@ -170,10 +208,25 @@ export default function ChatPage({ params }: ChatPageProps) {
         id: (Date.now() + 1).toString(),
         content: data.response,
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date().toISOString()
       };
 
-      setMessages(prev => [...prev, aiMessage]);
+      const updatedMessages = [userMessage, aiMessage];
+      setMessages(updatedMessages);
+
+      // Update conversation in Supabase with both messages
+      if (user?.id) {
+        const { error: updateError } = await supabase
+          .from('Conversation')
+          .update({
+            messages: updatedMessages,
+          })
+          .eq('id', convId);
+
+        if (updateError) {
+          console.error('Error updating conversation:', updateError);
+        }
+      }
 
       if (data.enrichedWithRealData) {
         console.log('✨ Response enhanced with real travel data!');
@@ -191,7 +244,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         id: (Date.now() + 1).toString(),
         content: `❌ ${handleAPIError(error)}`,
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -201,14 +254,47 @@ export default function ChatPage({ params }: ChatPageProps) {
 
   const loadConversation = async (convId: string) => {
     try {
+      // First try to load from Supabase
+      if (user?.id) {
+        const { data: supabaseData, error } = await supabase
+          .from('Conversation')
+          .select('messages')
+          .eq('id', convId)
+          .eq('user', user.id)
+          .single();
+
+        if (!error && supabaseData?.messages) {
+          setMessages(supabaseData.messages);
+          return;
+        }
+      }
+
+      // Fallback to API if not in Supabase
       const data = await chatAPI.getConversation(convId);
       const formattedMessages = data.conversation.map((msg: any, index: number) => ({
         id: `${convId}-${index}`,
         content: msg.content,
         isUser: msg.role === 'user',
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
       }));
       setMessages(formattedMessages);
+
+      // Save to Supabase for future use
+      if (user?.id) {
+        const { error } = await supabase
+          .from('Conversation')
+          .upsert({
+            id: convId,
+            user: user.id,
+            messages: formattedMessages,
+            created_at: new Date().toISOString()
+          });
+
+        if (error) {
+          console.error('Error saving conversation to Supabase:', error);
+        }
+      }
+
     } catch (error) {
       console.error('Failed to load conversation:', error);
       
@@ -223,8 +309,45 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
   };
 
-  const loadChatHistory = () => {
-    setChatHistory([]);
+  const loadChatHistory = async () => {
+    if (!user?.id) {
+      setChatHistory([]);
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('Conversation')
+        .select('id, messages, created_at')
+        .eq('user', user.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error loading chat history:', error);
+        setChatHistory([]);
+        return;
+      }
+
+      const formattedHistory: ChatHistory[] = data?.map(conversation => {
+        const messages = conversation.messages || [];
+        const firstUserMessage = messages.find((msg: Message) => msg.isUser);
+        
+        return {
+          id: conversation.id,
+          title: firstUserMessage?.content?.substring(0, 50) + '...' || 'New Chat',
+          messages: messages.map((msg: any) => ({
+            ...msg,
+            timestamp: typeof msg.timestamp === 'string' ? msg.timestamp : new Date(msg.timestamp).toISOString()
+          })),
+          lastMessage: new Date(conversation.created_at)
+        };
+      }) || [];
+
+      setChatHistory(formattedHistory);
+    } catch (error) {
+      console.error('Failed to load chat history:', error);
+      setChatHistory([]);
+    }
   };
 
   const handleSendMessage = async () => {
@@ -234,14 +357,17 @@ export default function ChatPage({ params }: ChatPageProps) {
       id: Date.now().toString(),
       content: inputValue,
       isUser: true,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     };
 
-    setMessages(prev => [...prev, userMessage]);
     const currentInput = inputValue;
     setInputValue('');
     setIsLoading(true);
     setConnectionError(null);
+
+    // Update messages state with user message
+    const updatedMessagesWithUser = [...messages, userMessage];
+    setMessages(updatedMessagesWithUser);
 
     try {
       const data = await chatAPI.sendMessage({
@@ -253,14 +379,32 @@ export default function ChatPage({ params }: ChatPageProps) {
         id: (Date.now() + 1).toString(),
         content: data.response,
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date().toISOString()
       };
 
-      setMessages(prev => [...prev, aiMessage]);
+      // Update messages state with AI response
+      const finalMessages = [...updatedMessagesWithUser, aiMessage];
+      setMessages(finalMessages);
 
       // Update conversation ID if it was created
       if (data.conversationId && !conversationId) {
         setConversationId(data.conversationId);
+      }
+
+      // Update the conversation in Supabase
+      if (user?.id) {
+        const { error } = await supabase
+          .from('Conversation')
+          .upsert({
+            id: conversationId || id,
+            user: user.id,
+            messages: finalMessages,
+            created_at: new Date().toISOString()
+          });
+
+        if (error) {
+          console.error('Error updating conversation:', error);
+        }
       }
 
       if (data.enrichedWithRealData) {
@@ -283,7 +427,7 @@ export default function ChatPage({ params }: ChatPageProps) {
         id: (Date.now() + 1).toString(),
         content: `❌ ${handleAPIError(error)}`,
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date().toISOString()
       };
       setMessages(prev => [...prev, errorMessage]);
     } finally {
@@ -330,10 +474,19 @@ export default function ChatPage({ params }: ChatPageProps) {
     }
   };
 
-  const handleLogout = () => {
-    // Add your logout logic here
-    console.log('Logging out...');
-    // Example: signOut() or redirect to login
+  const handleLogout = async () => {
+    try {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error('Logout error:', error);
+      } else {
+        setUser(null);
+        setUserEmail('');
+        window.location.href = '/log-in';
+      }
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
   };
 
   const formatDate = (date: Date) => {
@@ -348,6 +501,14 @@ export default function ChatPage({ params }: ChatPageProps) {
     } else {
       return date.toLocaleDateString();
     }
+  };
+
+  const formatMessageTime = (timestamp: string) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], {
+      hour: '2-digit',
+      minute: '2-digit'
+    });
   };
 
   // Show loading screen while initializing
@@ -436,17 +597,15 @@ export default function ChatPage({ params }: ChatPageProps) {
               </div>
               
               {/* Logout Button - appears on hover */}
-        {
-                showLogout && userEmail && (
-                  <button
-                    onClick={handleLogout}
-                    className="absolute right-0 top-full mt-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <LogOut size={16} className="inline mr-2" />
-                    Logout
-                  </button>
-                )
-        }
+              {showLogout && userEmail && (
+                <button
+                  onClick={handleLogout}
+                  className="absolute right-0 top-full mt-2 w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <LogOut size={16} className="inline mr-2" />
+                  Logout
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -526,10 +685,7 @@ export default function ChatPage({ params }: ChatPageProps) {
                       </div>
                     </div>
                     <div className="text-xs text-gray-500 mt-1 px-2">
-                      {message.timestamp.toLocaleTimeString([], {
-                        hour: '2-digit',
-                        minute: '2-digit'
-                      })}
+                      {formatMessageTime(message.timestamp)}
                     </div>
                   </div>
                 </div>
@@ -580,26 +736,26 @@ export default function ChatPage({ params }: ChatPageProps) {
                   </svg>
                 </button>
                 <div className="flex gap-3">
-                    <button className="hover:cursor-pointer transition-opacity hover:opacity-70">
+                  <button className="hover:cursor-pointer transition-opacity hover:opacity-70">
                     <svg xmlns="http://www.w3.org/2000/svg" width="29" height="29" viewBox="0 0 29 29" fill="none">
-                        <rect x="10.875" y="3.625" width="7.25" height="13.2917" rx="3" stroke="#222222" strokeWidth="2" strokeLinejoin="round"/>
-                        <path d="M6.25 13.2917C6.25 15.4797 7.11919 17.5781 8.66637 19.1253C10.2135 20.6725 12.312 21.5417 14.5 21.5417C16.688 21.5417 18.7865 20.6725 20.3336 19.1253C21.8808 17.5781 22.75 15.4797 22.75 13.2917" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        <path d="M14.5 25.375V22.9583" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <rect x="10.875" y="3.625" width="7.25" height="13.2917" rx="3" stroke="#222222" strokeWidth="2" strokeLinejoin="round"/>
+                      <path d="M6.25 13.2917C6.25 15.4797 7.11919 17.5781 8.66637 19.1253C10.2135 20.6725 12.312 21.5417 14.5 21.5417C16.688 21.5417 18.7865 20.6725 20.3336 19.1253C21.8808 17.5781 22.75 15.4797 22.75 13.2917" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M14.5 25.375V22.9583" stroke="#222222" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                     </svg>
-                    </button>
-                    <button 
+                  </button>
+                  <button 
                     onClick={handleSendMessage}
                     disabled={!inputValue.trim() || isLoading}
                     className="hover:cursor-pointer transition-all duration-200 hover:scale-105 disabled:opacity-30 disabled:cursor-not-allowed bg-blue-500 hover:bg-blue-600 text-white rounded-full p-2"
-                    >
-                        {isLoading ? (
-                          <Loader2 className="w-5 h-5 animate-spin" />
-                        ) : (
-                          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
-                            <path d="M19.4354 0.581983C18.9352 0.0685981 18.1949 -0.122663 17.5046 0.0786645L1.408 4.75952C0.679698 4.96186 0.163487 5.54269 0.0244302 6.28055C-0.117628 7.0315 0.378575 7.98479 1.02684 8.38342L6.0599 11.4768C6.57611 11.7939 7.24239 11.7144 7.66956 11.2835L13.4329 5.4843C13.723 5.18231 14.2032 5.18231 14.4934 5.4843C14.7835 5.77623 14.7835 6.24935 14.4934 6.55134L8.71999 12.3516C8.29181 12.7814 8.21178 13.4508 8.52691 13.9702L11.6022 19.0538C11.9623 19.6577 12.5826 20 13.2628 20C13.3429 20 13.4329 20 13.513 19.9899C14.2933 19.8893 14.9135 19.3558 15.1436 18.6008L19.9156 2.52479C20.1257 1.84028 19.9356 1.09537 19.4354 0.581983" fill="currentColor"/>
-                          </svg>
-                        )}
-                    </button>
+                  >
+                    {isLoading ? (
+                      <Loader2 className="w-5 h-5 animate-spin" />
+                    ) : (
+                      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20" fill="none">
+                        <path d="M19.4354 0.581983C18.9352 0.0685981 18.1949 -0.122663 17.5046 0.0786645L1.408 4.75952C0.679698 4.96186 0.163487 5.54269 0.0244302 6.28055C-0.117628 7.0315 0.378575 7.98479 1.02684 8.38342L6.0599 11.4768C6.57611 11.7939 7.24239 11.7144 7.66956 11.2835L13.4329 5.4843C13.723 5.18231 14.2032 5.18231 14.4934 5.4843C14.7835 5.77623 14.7835 6.24935 14.4934 6.55134L8.71999 12.3516C8.29181 12.7814 8.21178 13.4508 8.52691 13.9702L11.6022 19.0538C11.9623 19.6577 12.5826 20 13.2628 20C13.3429 20 13.4329 20 13.513 19.9899C14.2933 19.8893 14.9135 19.3558 15.1436 18.6008L19.9156 2.52479C20.1257 1.84028 19.9356 1.09537 19.4354 0.581983" fill="currentColor"/>
+                      </svg>
+                    )}
+                  </button>
                 </div>
               </div>
             </div>
