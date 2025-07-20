@@ -14,7 +14,7 @@ const LogIn = () => {
         const { data, error } = await supabase.auth.signInWithOAuth({
           provider: 'google', // or whatever provider
           options: {
-            redirectTo: 'http://localhost:3000/auth/callback' // Must match Supabase config
+            redirectTo: 'https://triptailor-ten.vercel.app/auth/callback' // Must match Supabase config
           }
         })
 
